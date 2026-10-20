@@ -1,0 +1,314 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  TPO
+  STUDENT
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(STUDENT)
+  createdAt    DateTime @default(now())
+
+  studentProfile    Student?
+  academicImports   AcademicImportBatch[]
+  statusChanges     PlacementStatusHistory[]
+  emailCampaigns    EmailCampaign[]
+  uploadedDocuments StudentDocument[]        @relation("DocumentUploader")
+}
+
+model Department {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  students          Student[]
+  eligibleForDrives DriveEligibleBranch[]
+}
+
+enum AcademicPathway {
+  HSC
+  DIPLOMA
+}
+
+model Student {
+  id             Int    @id @default(autoincrement())
+  userId         Int    @unique
+  PRN            String @unique
+  departmentId   Int
+  graduationYear Int
+
+  academicPathway   AcademicPathway
+  CGPA              Float?
+  tenthPercentage   Float?
+  twelfthPercentage Float?
+  diplomaPercentage Float?
+  activeBacklogs    Int             @default(0)
+
+  createdAt DateTime @default(now())
+
+  user                User                 @relation(fields: [userId], references: [id])
+  department          Department           @relation(fields: [departmentId], references: [id])
+  documents           StudentDocument[]
+  driveParticipations DriveParticipation[]
+  selection           StudentSelection?
+  emailRecipients     EmailRecipient[]
+  importRows          AcademicImportRow[]
+}
+
+model StudentDocument {
+  id               Int      @id @default(autoincrement())
+  studentId        Int
+  uploadedByUserId Int?
+  documentType     String
+  fileName         String
+  fileUrl          String
+  uploadedAt       DateTime @default(now())
+
+  student    Student @relation(fields: [studentId], references: [id])
+  uploadedBy User?   @relation("DocumentUploader", fields: [uploadedByUserId], references: [id])
+}
+
+model AcademicImportBatch {
+  id               Int      @id @default(autoincrement())
+  fileName         String
+  importedByUserId Int
+  totalRows        Int      @default(0)
+  successfulRows   Int      @default(0)
+  failedRows       Int      @default(0)
+  importedAt       DateTime @default(now())
+
+  importedBy User                @relation(fields: [importedByUserId], references: [id])
+  rows       AcademicImportRow[]
+}
+
+enum ImportRowStatus {
+  SUCCESS
+  FAILED
+}
+
+model AcademicImportRow {
+  id           Int             @id @default(autoincrement())
+  batchId      Int
+  rowNumber    Int
+  PRN          String?
+  status       ImportRowStatus
+  errorMessage String?
+  studentId    Int?
+  createdAt    DateTime        @default(now())
+
+  batch   AcademicImportBatch @relation(fields: [batchId], references: [id])
+  student Student?            @relation(fields: [studentId], references: [id])
+
+  @@unique([batchId, rowNumber])
+}
+
+model Company {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  website     String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  jobRoles        JobRole[]
+  placementDrives PlacementDrive[]
+}
+
+model JobRole {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  title       String
+  description String?
+  domain      String?
+  createdAt   DateTime @default(now())
+
+  company         Company          @relation(fields: [companyId], references: [id])
+  placementDrives PlacementDrive[]
+}
+
+enum DriveStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model PlacementDrive {
+  id                  Int         @id @default(autoincrement())
+  companyId           Int
+  jobRoleId           Int
+  title               String
+  packageLPA          Float
+  driveDate           DateTime?
+  applicationDeadline DateTime?
+  status              DriveStatus @default(UPCOMING)
+  venue               String?
+  hiringProcess       String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  company             Company               @relation(fields: [companyId], references: [id])
+  jobRole             JobRole               @relation(fields: [jobRoleId], references: [id])
+  eligibilityCriteria EligibilityCriteria?
+  eligibleBranches    DriveEligibleBranch[]
+  eligibleYears       DriveEligibleYear[]
+  participations      DriveParticipation[]
+  selections          StudentSelection[]
+  emailCampaigns      EmailCampaign[]
+}
+
+model EligibilityCriteria {
+  id                       Int      @id @default(autoincrement())
+  driveId                  Int      @unique
+  minimumCGPA              Float    @default(0)
+  minimumTenth             Float    @default(0)
+  minimumDiplomaPercentage Float?
+  minimumTwelfth           Float?
+  maximumBacklogs          Int      @default(0)
+  allowPreviousPlacement   Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  drive PlacementDrive @relation(fields: [driveId], references: [id])
+}
+
+model DriveEligibleBranch {
+  id           Int @id @default(autoincrement())
+  driveId      Int
+  departmentId Int
+
+  drive      PlacementDrive @relation(fields: [driveId], references: [id])
+  department Department     @relation(fields: [departmentId], references: [id])
+
+  @@unique([driveId, departmentId])
+}
+
+model DriveEligibleYear {
+  id             Int @id @default(autoincrement())
+  driveId        Int
+  graduationYear Int
+
+  drive PlacementDrive @relation(fields: [driveId], references: [id])
+
+  @@unique([driveId, graduationYear])
+}
+
+enum ParticipationStatus {
+  APPLIED
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  REJECTED
+}
+
+model DriveParticipation {
+  id            Int                 @id @default(autoincrement())
+  studentId     Int
+  driveId       Int
+  processStatus ParticipationStatus @default(APPLIED)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  student       Student                  @relation(fields: [studentId], references: [id])
+  drive         PlacementDrive           @relation(fields: [driveId], references: [id])
+  statusHistory PlacementStatusHistory[]
+
+  @@unique([studentId, driveId])
+}
+
+model PlacementStatusHistory {
+  id              Int                  @id @default(autoincrement())
+  participationId Int
+  oldStatus       ParticipationStatus?
+  newStatus       ParticipationStatus
+  remarks         String?
+  changedByUserId Int
+  changedAt       DateTime             @default(now())
+
+  participation DriveParticipation @relation(fields: [participationId], references: [id])
+  changedBy     User               @relation(fields: [changedByUserId], references: [id])
+}
+
+enum SelectionStatus {
+  SELECTED
+  OFFER_ACCEPTED
+  OFFER_DECLINED
+}
+
+model StudentSelection {
+  id         Int             @id @default(autoincrement())
+  studentId  Int             @unique
+  driveId    Int
+  status     SelectionStatus @default(SELECTED)
+  packageLPA Float
+  selectedAt DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  student Student        @relation(fields: [studentId], references: [id])
+  drive   PlacementDrive @relation(fields: [driveId], references: [id])
+}
+
+enum EmailCampaignStatus {
+  DRAFT
+  QUEUED
+  SENDING
+  COMPLETED
+  COMPLETED_WITH_FAILURES
+  FAILED
+  CANCELLED
+}
+
+model EmailCampaign {
+  id              Int                 @id @default(autoincrement())
+  driveId         Int
+  createdByUserId Int
+  subject         String
+  body            String
+  status          EmailCampaignStatus @default(DRAFT)
+  createdAt       DateTime            @default(now())
+  confirmedAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  drive      PlacementDrive   @relation(fields: [driveId], references: [id])
+  createdBy  User             @relation(fields: [createdByUserId], references: [id])
+  recipients EmailRecipient[]
+}
+
+enum EmailRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model EmailRecipient {
+  id           Int                  @id @default(autoincrement())
+  campaignId   Int
+  studentId    Int
+  emailAddress String
+  status       EmailRecipientStatus @default(PENDING)
+  sentAt       DateTime?
+  createdAt    DateTime             @default(now())
+
+  campaign EmailCampaign @relation(fields: [campaignId], references: [id])
+  student  Student       @relation(fields: [studentId], references: [id])
+
+  @@unique([campaignId, studentId])
+}
