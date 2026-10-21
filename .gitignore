@@ -8,11 +8,19 @@ node_modules/
 
 # Build output
 dist/
+dist-ssr/
 build/
 
 # Logs
 logs/
 *.log
 
-# Editor settings
+# Editor & OS settings
 .vscode/
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
