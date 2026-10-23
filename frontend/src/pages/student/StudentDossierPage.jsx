@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
-import dkteLogo from '../../assets/dkte-logo.jpg';
+import dkteLogo from '../../assets/dkte-logo.png';
 import { LogOut, GraduationCap, User } from 'lucide-react';
 
 export default function StudentDossierPage() {
@@ -22,7 +22,7 @@ export default function StudentDossierPage() {
             <img
               src={dkteLogo}
               alt="DKTE Logo"
-              className="h-7 w-auto object-contain rounded-sm"
+              className="h-6 w-auto object-contain"
             />
             <span className="text-gray-400 text-xs">|</span>
             <span className="font-semibold text-sm tracking-tight text-gray-200">

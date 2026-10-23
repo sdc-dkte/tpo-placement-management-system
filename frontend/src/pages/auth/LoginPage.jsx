@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import rajwadaImg from '../../assets/dkte-rajwada.jpg';
-import dkteLogo from '../../assets/dkte-logo.jpg';
+import dkteLogo from '../../assets/dkte-logo.png';
 import {
   Lock,
   Mail,
@@ -86,11 +86,13 @@ export default function LoginPage() {
         {/* Top Institutional Crest / Badges */}
         <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <img
-              src={dkteLogo}
-              alt="DKTE Logo"
-              className="h-8 w-auto object-contain rounded bg-white px-1.5 py-0.5 shadow-sm"
-            />
+            <div className="bg-gray-900/60 backdrop-blur-sm border border-gray-700/80 rounded px-2 py-1 flex items-center shadow-sm">
+              <img
+                src={dkteLogo}
+                alt="DKTE Logo"
+                className="h-6 w-auto object-contain"
+              />
+            </div>
             <span className="text-gray-300 text-xs font-medium tracking-wider uppercase border-l border-gray-600 pl-3">
               Autonomous Institute • Estd 1982
             </span>
