@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import rajwadaImg from '../../assets/dkte-rajwada.jpg';
+import dkteLogo from '../../assets/dkte-logo.jpg';
 import {
   Lock,
   Mail,
@@ -44,8 +45,12 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     try {
-      await login({ email: trimmedEmail, password });
-      navigate('/', { replace: true });
+      const response = await login({ email: trimmedEmail, password });
+      if (response?.user?.role === 'TPO') {
+        navigate('/dashboard', { replace: true });
+      } else {
+        navigate('/portal/dossier', { replace: true });
+      }
     } catch (err) {
       setErrorMessage(err.message || 'Invalid email or password. Please try again.');
     } finally {
@@ -81,9 +86,11 @@ export default function LoginPage() {
         {/* Top Institutional Crest / Badges */}
         <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <span className="inline-flex items-center px-3 py-1 rounded bg-[#FECC00] text-[#111827] text-xs font-bold tracking-wide uppercase shadow-sm">
-              DKTE
-            </span>
+            <img
+              src={dkteLogo}
+              alt="DKTE Logo"
+              className="h-8 w-auto object-contain rounded bg-white px-1.5 py-0.5 shadow-sm"
+            />
             <span className="text-gray-300 text-xs font-medium tracking-wider uppercase border-l border-gray-600 pl-3">
               Autonomous Institute • Estd 1982
             </span>
@@ -141,8 +148,18 @@ export default function LoginPage() {
       <div className="w-full lg:w-[42%] flex items-center justify-center p-6 sm:p-10 lg:p-14">
         <div className="w-full max-w-md bg-white border border-gray-200 rounded p-8 sm:p-10 shadow-hairline">
           {/* Header Accent Bar & Titles */}
-          <div className="mb-8">
-            <div className="w-12 h-1 bg-[#FECC00] rounded mb-5" />
+          <div className="mb-7">
+            <div className="flex items-center justify-between mb-4">
+              <img
+                src={dkteLogo}
+                alt="DKTE Logo"
+                className="h-10 w-auto object-contain"
+              />
+              <span className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase px-2 py-0.5 rounded border border-gray-200 bg-gray-50">
+                Placement Console
+              </span>
+            </div>
+            <div className="w-12 h-1 bg-[#FECC00] rounded mb-4" />
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight mb-1.5">
               Institutional Sign-In
             </h2>
