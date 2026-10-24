@@ -87,32 +87,54 @@ model StudentDocument {
 }
 
 model AcademicImportBatch {
-  id               Int      @id @default(autoincrement())
+  id               Int               @id @default(autoincrement())
   fileName         String
   importedByUserId Int
-  totalRows        Int      @default(0)
-  successfulRows   Int      @default(0)
-  failedRows       Int      @default(0)
-  importedAt       DateTime @default(now())
+  totalRows        Int               @default(0)
+  successfulRows   Int               @default(0)
+  failedRows       Int               @default(0)
+  status           ImportBatchStatus @default(PROCESSING)
+  importedAt       DateTime          @default(now())
+  startedAt        DateTime          @default(now())
+  completedAt      DateTime?
+  updatedAt        DateTime          @default(now()) @updatedAt
+
+  // Batch-level coordination for retry and recovery
+  processingToken     String?
+  processingStartedAt DateTime?
 
   importedBy User                @relation(fields: [importedByUserId], references: [id])
   rows       AcademicImportRow[]
 }
 
+enum ImportBatchStatus {
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+}
+
 enum ImportRowStatus {
+  PENDING
+  PROCESSING
   SUCCESS
   FAILED
 }
 
 model AcademicImportRow {
-  id           Int             @id @default(autoincrement())
-  batchId      Int
-  rowNumber    Int
-  PRN          String?
-  status       ImportRowStatus
-  errorMessage String?
-  studentId    Int?
-  createdAt    DateTime        @default(now())
+  id                  Int             @id @default(autoincrement())
+  batchId             Int
+  rowNumber           Int
+  PRN                 String?
+  status              ImportRowStatus @default(PENDING)
+  errorMessage        String?
+  studentId           Int?
+  rowData             Json?
+  attemptCount        Int             @default(0)
+  processedAt         DateTime?
+  createdAt           DateTime        @default(now())
+  processingToken     String?
+  processingStartedAt DateTime?
 
   batch   AcademicImportBatch @relation(fields: [batchId], references: [id])
   student Student?            @relation(fields: [studentId], references: [id])
