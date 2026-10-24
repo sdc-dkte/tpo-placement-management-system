@@ -5,10 +5,9 @@ const jwt = require("jsonwebtoken");
 
 const login = async (req, res) => {
     try {
-        const identifier = (req.body.email || req.body.identifier || req.body.PRN || "").trim();
-        const { password, role } = req.body;
+        const { email, password } = req.body;
 
-        if (!identifier || !password) {
+        if (!email || !password) {
             return res.status(400).json({
                 success: false,
                 message: "Email and password are required.",
@@ -24,23 +23,9 @@ const login = async (req, res) => {
             });
         }
 
-        // 1. Look up user by institutional email
-        let user = await prisma.user.findUnique({
-            where: { email: identifier.toLowerCase() },
-            include: { studentProfile: true },
+        const user = await prisma.user.findUnique({
+            where: { email: email.trim().toLowerCase() },
         });
-
-        // 2. If not found by email, check if identifier is a student PRN
-        if (!user) {
-            const student = await prisma.student.findUnique({
-                where: { PRN: identifier },
-                include: { user: true },
-            });
-
-            if (student && student.user) {
-                user = { ...student.user, studentProfile: student };
-            }
-        }
 
         if (!user) {
             return res.status(401).json({
@@ -49,15 +34,6 @@ const login = async (req, res) => {
             });
         }
 
-        // 3. If a specific portal role was requested (TPO vs STUDENT), verify role match
-        if (role && user.role !== role) {
-            return res.status(403).json({
-                success: false,
-                message: `This account is registered as ${user.role}.`,
-            });
-        }
-
-        // 4. Verify password
         const passwordMatches = await bcrypt.compare(
             password,
             user.passwordHash
