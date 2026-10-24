@@ -110,7 +110,7 @@ app.use((err, req, res, next) => {
 // 6. Start Server
 // ====================
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
 const server = app.listen(PORT, HOST, () => {
