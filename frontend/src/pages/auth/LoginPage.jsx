@@ -5,13 +5,13 @@ import rajwadaImg from '../../assets/dkte-rajwada.jpg';
 import dkteLogo from '../../assets/dkte-logo.png';
 import {
   Lock,
+  Mail,
   Eye,
   EyeOff,
   AlertCircle,
   Loader2,
   ShieldCheck,
   Building2,
-  User,
   Sparkles,
 } from 'lucide-react';
 
@@ -31,7 +31,7 @@ export default function LoginPage() {
 
     const trimmedId = identifier.trim();
     if (!trimmedId) {
-      setErrorMessage('Please enter your Email or PRN.');
+      setErrorMessage('Please enter your institutional email.');
       return;
     }
 
@@ -54,7 +54,7 @@ export default function LoginPage() {
       }
     } catch (err) {
       setErrorMessage(
-        err.message || 'Invalid credentials. Please verify your Email/PRN and password.'
+        err.message || 'Invalid credentials. Please verify your email and password.'
       );
     } finally {
       setIsSubmitting(false);
@@ -62,8 +62,8 @@ export default function LoginPage() {
   };
 
   const fillStudentDemo = () => {
-    setIdentifier('2023CSE001');
-    setPassword('2023CSE001');
+    setIdentifier('student@dkte.ac.in');
+    setPassword('24UAD065');
     setErrorMessage('');
   };
 
@@ -175,24 +175,24 @@ export default function LoginPage() {
 
           {/* Clean Unified Sign-In Form */}
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
-            {/* PRN or Email Input */}
+            {/* Institutional Email Input */}
             <div>
               <label
                 htmlFor="identifier"
                 className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1.5"
               >
-                Email or PRN <span className="text-red-500">*</span>
+                Institutional Email <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                  <User className="w-4 h-4" />
+                  <Mail className="w-4 h-4" />
                 </div>
                 <input
                   id="identifier"
                   name="identifier"
-                  type="text"
+                  type="email"
                   required
-                  autoComplete="username"
+                  autoComplete="username email"
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck="false"
@@ -201,7 +201,7 @@ export default function LoginPage() {
                     setIdentifier(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g. 2023CSE001 or tpo@dkte.ac.in"
+                  placeholder="e.g. student@dkte.ac.in or tpo@dkte.ac.in"
                   className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
                 />
               </div>
@@ -217,7 +217,7 @@ export default function LoginPage() {
                   Password <span className="text-red-500">*</span>
                 </label>
                 <span className="text-[11px] text-gray-500 font-medium">
-                  Students: Default password is your PRN
+                  Students: Enter PRN (e.g. 24UAD065)
                 </span>
               </div>
               <div className="relative">
@@ -284,7 +284,7 @@ export default function LoginPage() {
                 className="px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-left transition-colors"
               >
                 <div className="text-xs font-semibold text-gray-800">Student</div>
-                <div className="text-[10px] text-gray-500 font-mono">2023CSE001</div>
+                <div className="text-[10px] text-gray-500 font-mono">student@dkte.ac.in</div>
               </button>
 
               <button

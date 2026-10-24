@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 const departments = [
     { name: "Computer Science and Engineering", code: "CSE" },
     { name: "Information Technology", code: "IT" },
+    { name: "Artificial Intelligence and Data Science", code: "AIDS" },
     { name: "Electronics and Telecommunication", code: "ENTC" },
     { name: "Mechanical Engineering", code: "MECH" },
     { name: "Civil Engineering", code: "CIVIL" },
@@ -53,7 +54,7 @@ async function main() {
 
     // 3. Seed Demo Student Account
     const studentEmail = "student@dkte.ac.in";
-    const studentPRN = "2023CSE001";
+    const studentPRN = "24UAD065";
     const studentPassword = studentPRN; // PRN as default password
     const studentPasswordHash = await bcrypt.hash(studentPassword, 12);
 
@@ -76,7 +77,7 @@ async function main() {
                 userId: studentUser.id,
                 PRN: studentPRN,
                 departmentId: cseDept.id,
-                graduationYear: 2026,
+                graduationYear: 2028,
                 academicPathway: "HSC",
                 CGPA: 8.85,
                 tenthPercentage: 88.5,
@@ -90,7 +91,11 @@ async function main() {
             where: { id: existingStudent.id },
             data: { passwordHash: studentPasswordHash },
         });
-        console.log(`Demo Student password updated to PRN: ${studentPassword}`);
+        await prisma.student.updateMany({
+            where: { userId: existingStudent.id },
+            data: { PRN: studentPRN },
+        });
+        console.log(`Demo Student PRN & password updated to PRN: ${studentPassword}`);
     }
 }
 

@@ -11,7 +11,7 @@ const login = async (req, res) => {
         if (!identifier || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email/PRN and password are required.",
+                message: "Email and password are required.",
             });
         }
 
@@ -45,7 +45,7 @@ const login = async (req, res) => {
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid credentials. Please verify your email/PRN and password.",
+                message: "Invalid email or password.",
             });
         }
 
@@ -66,7 +66,7 @@ const login = async (req, res) => {
         if (!passwordMatches) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email/PRN or password.",
+                message: "Invalid email or password.",
             });
         }
 
