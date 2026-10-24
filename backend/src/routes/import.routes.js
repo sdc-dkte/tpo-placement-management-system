@@ -1,7 +1,12 @@
 const express = require("express");
 const multer = require("multer");
 
-const { importStudents } = require("../controllers/import.controller");
+const {
+    importStudents,
+    getImportBatchStatus,
+    retryImportBatch,
+    recoverImportBatch
+} = require("../controllers/import.controller");
 const authenticateToken = require("../middleware/auth.middleware");
 const allowRoles = require("../middleware/role.middleware");
 
@@ -52,6 +57,27 @@ router.post(
     allowRoles("TPO"),
     handleUpload,
     importStudents
+);
+
+router.get(
+    "/students/:batchId",
+    authenticateToken,
+    allowRoles("TPO"),
+    getImportBatchStatus
+);
+
+router.post(
+    "/students/:batchId/retry",
+    authenticateToken,
+    allowRoles("TPO"),
+    retryImportBatch
+);
+
+router.post(
+  "/students/:batchId/recover",
+  authenticateToken,
+  allowRoles("TPO"),
+  recoverImportBatch
 );
 
 module.exports = router;
