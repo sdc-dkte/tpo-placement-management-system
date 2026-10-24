@@ -4,7 +4,13 @@ import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 import LoginPage from './pages/auth/LoginPage';
 import TpoDashboardPage from './pages/tpo/TpoDashboardPage';
+import TpoDrivesPage from './pages/tpo/TpoDrivesPage';
+import TpoCompaniesPage from './pages/tpo/TpoCompaniesPage';
+import TpoStudentsPage from './pages/tpo/TpoStudentsPage';
+import TpoAnalyticsPage from './pages/tpo/TpoAnalyticsPage';
+import TpoSettingsPage from './pages/tpo/TpoSettingsPage';
 import StudentDossierPage from './pages/student/StudentDossierPage';
+import StudentDrivesPage from './pages/student/StudentDrivesPage';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import PublicOnlyRoute from './components/auth/PublicOnlyRoute';
 
@@ -29,8 +35,18 @@ export default function App() {
           {/* Protected Routes */}
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<RootRedirect />} />
+            
+            {/* TPO Operations Console */}
             <Route path="/dashboard" element={<TpoDashboardPage />} />
+            <Route path="/drives" element={<TpoDrivesPage />} />
+            <Route path="/companies" element={<TpoCompaniesPage />} />
+            <Route path="/students" element={<TpoStudentsPage />} />
+            <Route path="/analytics" element={<TpoAnalyticsPage />} />
+            <Route path="/settings" element={<TpoSettingsPage />} />
+
+            {/* Student Portal */}
             <Route path="/portal/dossier" element={<StudentDossierPage />} />
+            <Route path="/portal/drives" element={<StudentDrivesPage />} />
           </Route>
 
           {/* Catch-all fallback */}

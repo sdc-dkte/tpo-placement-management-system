@@ -6,10 +6,10 @@ import { apiClient } from './client';
  * @param {string} password
  * @returns {Promise<{ success: boolean, message: string, token: string, user: { id: number, name: string, email: string, role: string } }>}
  */
-export async function loginApi({ email, password }) {
+export async function loginApi({ email, password, role }) {
   return apiClient('/auth/login', {
     method: 'POST',
-    body: { email, password },
+    body: { email, password, role },
   });
 }
 

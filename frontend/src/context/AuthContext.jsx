@@ -52,11 +52,11 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const login = useCallback(async ({ email, password }) => {
+  const login = useCallback(async ({ email, password, role }) => {
     setIsLoading(true);
     setAuthError(null);
     try {
-      const response = await loginApi({ email, password });
+      const response = await loginApi({ email, password, role });
       if (response.success && response.token) {
         localStorage.setItem(TOKEN_STORAGE_KEY, response.token);
         setToken(response.token);

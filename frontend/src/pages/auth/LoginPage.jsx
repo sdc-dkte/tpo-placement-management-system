@@ -5,36 +5,33 @@ import rajwadaImg from '../../assets/dkte-rajwada.jpg';
 import dkteLogo from '../../assets/dkte-logo.png';
 import {
   Lock,
-  Mail,
   Eye,
   EyeOff,
   AlertCircle,
   Loader2,
   ShieldCheck,
   Building2,
-  Award,
-  ChevronDown,
-  ChevronUp,
+  User,
+  Sparkles,
 } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showDemoCredentials, setShowDemoCredentials] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setErrorMessage('Please enter your institutional email or PRN.');
+    const trimmedId = identifier.trim();
+    if (!trimmedId) {
+      setErrorMessage('Please enter your Email or PRN.');
       return;
     }
 
@@ -45,22 +42,34 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await login({ email: trimmedEmail, password });
+      const response = await login({
+        email: trimmedId,
+        password,
+      });
+
       if (response?.user?.role === 'TPO') {
         navigate('/dashboard', { replace: true });
       } else {
         navigate('/portal/dossier', { replace: true });
       }
     } catch (err) {
-      setErrorMessage(err.message || 'Invalid email or password. Please try again.');
+      setErrorMessage(
+        err.message || 'Invalid credentials. Please verify your Email/PRN and password.'
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const fillCredentials = (demoEmail, demoPass) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
+  const fillStudentDemo = () => {
+    setIdentifier('2023CSE001');
+    setPassword('2023CSE001');
+    setErrorMessage('');
+  };
+
+  const fillTpoDemo = () => {
+    setIdentifier('tpo@dkte.ac.in');
+    setPassword('Admin@1234');
     setErrorMessage('');
   };
 
@@ -69,7 +78,7 @@ export default function LoginPage() {
       {/* ========================================================= */}
       {/* LEFT COLUMN: DKTE Rajwada Campus Visual & Institutional Heritage */}
       {/* ========================================================= */}
-      <div className="relative w-full lg:w-[58%] min-h-[380px] lg:min-h-screen overflow-hidden bg-gray-950 flex flex-col justify-between p-8 sm:p-12 lg:p-16">
+      <div className="relative w-full lg:w-[58%] min-h-[340px] lg:min-h-screen overflow-hidden bg-gray-950 flex flex-col justify-between p-8 sm:p-12 lg:p-16">
         {/* Background Image with Crisp Object Fit */}
         <img
           src={rajwadaImg}
@@ -79,14 +88,14 @@ export default function LoginPage() {
 
         {/* Multi-Stop Cinematic Gradient Overlay */}
         <div
-          className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/75 to-gray-950/40 lg:bg-gradient-to-r lg:from-gray-950/85 lg:via-gray-950/65 lg:to-gray-950/30"
+          className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/75 to-gray-950/40 lg:bg-gradient-to-r lg:from-gray-950/85 lg:via-gray-950/60 lg:to-gray-950/30"
           aria-hidden="true"
         />
 
         {/* Top Institutional Crest / Badges */}
         <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
-            <div className="bg-gray-900/60 backdrop-blur-sm border border-gray-700/80 rounded px-2 py-1 flex items-center shadow-sm">
+            <div className="bg-gray-900/60 backdrop-blur-sm border border-gray-700/80 rounded px-2.5 py-1.5 flex items-center shadow-sm">
               <img
                 src={dkteLogo}
                 alt="DKTE Logo"
@@ -104,37 +113,20 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Center / Bottom Institutional Heading & Placement Narrative */}
-        <div className="relative z-10 max-w-xl my-auto lg:my-0 pt-12 pb-6">
+        {/* Center / Bottom Institutional Heading */}
+        <div className="relative z-10 max-w-xl my-auto lg:my-0 pt-10 pb-4">
           <div className="inline-flex items-center space-x-2 text-[#FECC00] text-xs sm:text-sm font-semibold tracking-wide uppercase mb-3">
             <Building2 className="w-4 h-4" />
-            <span>Central Training & Placement Cell</span>
+            <span>Central Training &amp; Placement Cell</span>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight mb-4">
-            D.K.T.E. Society&apos;s Textile & Engineering Institute
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight mb-3">
+            D.K.T.E. Society&apos;s Textile &amp; Engineering Institute
           </h1>
 
-          <p className="text-gray-300 text-sm sm:text-base leading-relaxed mb-6 font-normal">
-            Welcome to the official DKTE Placement Console. Powering institutional campus recruitment,
-            verified candidate dossiers, corporate partnerships, and transparent hiring drives.
+          <p className="text-gray-300 text-sm leading-relaxed max-w-md font-normal">
+            Official Placement Management Portal for campus recruitment drives, verified dossiers, and institutional analytics.
           </p>
-
-          {/* Institutional Highlights Grid */}
-          <div className="grid grid-cols-3 gap-3 pt-4 border-t border-gray-800/80">
-            <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-800 rounded p-3">
-              <div className="text-[#FECC00] font-bold text-lg sm:text-xl tabular-nums">100+</div>
-              <div className="text-gray-400 text-xs">Annual Recruiters</div>
-            </div>
-            <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-800 rounded p-3">
-              <div className="text-[#FECC00] font-bold text-lg sm:text-xl tabular-nums">₹24.00 LPA</div>
-              <div className="text-gray-400 text-xs">Highest Package</div>
-            </div>
-            <div className="bg-gray-900/70 backdrop-blur-sm border border-gray-800 rounded p-3">
-              <div className="text-[#FECC00] font-bold text-lg sm:text-xl tabular-nums">90%+</div>
-              <div className="text-gray-400 text-xs">Placement Rate</div>
-            </div>
-          </div>
         </div>
 
         {/* Footer Caption */}
@@ -158,15 +150,15 @@ export default function LoginPage() {
                 className="h-10 w-auto object-contain"
               />
               <span className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase px-2 py-0.5 rounded border border-gray-200 bg-gray-50">
-                Placement Console
+                Placement Portal
               </span>
             </div>
-            <div className="w-12 h-1 bg-[#FECC00] rounded mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 tracking-tight mb-1.5">
+            <div className="w-12 h-1 bg-[#FECC00] rounded mb-3" />
+            <h2 className="text-2xl font-bold text-gray-900 tracking-tight mb-1">
               Institutional Sign-In
             </h2>
-            <p className="text-sm text-gray-600">
-              Access the placement console using your institutional credentials.
+            <p className="text-xs sm:text-sm text-gray-600">
+              Sign in with your DKTE credentials to access your portal.
             </p>
           </div>
 
@@ -174,48 +166,48 @@ export default function LoginPage() {
           {errorMessage && (
             <div
               role="alert"
-              className="mb-6 p-3.5 rounded border border-red-200 bg-red-50 text-red-800 text-sm flex items-start space-x-2.5 animate-fadeIn"
+              className="mb-6 p-3 rounded border border-red-200 bg-red-50 text-red-800 text-xs sm:text-sm flex items-start space-x-2.5 animate-fadeIn"
             >
               <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
               <div className="leading-snug">{errorMessage}</div>
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            {/* Email / PRN Field */}
+          {/* Clean Unified Sign-In Form */}
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {/* PRN or Email Input */}
             <div>
               <label
-                htmlFor="email"
+                htmlFor="identifier"
                 className="block text-xs font-semibold uppercase tracking-wider text-gray-700 mb-1.5"
               >
-                Institutional Email or PRN <span className="text-red-500">*</span>
+                Email or PRN <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                  <Mail className="w-4 h-4" />
+                  <User className="w-4 h-4" />
                 </div>
                 <input
-                  id="email"
-                  name="email"
-                  type="email"
+                  id="identifier"
+                  name="identifier"
+                  type="text"
                   required
-                  autoComplete="username email"
+                  autoComplete="username"
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck="false"
-                  value={email}
+                  value={identifier}
                   onChange={(e) => {
-                    setEmail(e.target.value);
+                    setIdentifier(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
-                  placeholder="e.g. tpo@dkte.ac.in or student email"
+                  placeholder="e.g. 2023CSE001 or tpo@dkte.ac.in"
                   className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
                 />
               </div>
             </div>
 
-            {/* Password Field */}
+            {/* Password Input */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label
@@ -224,7 +216,9 @@ export default function LoginPage() {
                 >
                   Password <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[11px] text-gray-500">Min 8 characters</span>
+                <span className="text-[11px] text-gray-500 font-medium">
+                  Students: Default password is your PRN
+                </span>
               </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
@@ -242,12 +236,11 @@ export default function LoginPage() {
                     if (errorMessage) setErrorMessage('');
                   }}
                   placeholder="••••••••••••"
-                  className="w-full pl-9 pr-11 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
+                  className="w-full pl-9 pr-10 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
                 />
                 <button
                   type="button"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  aria-pressed={showPassword}
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
                 >
@@ -269,65 +262,44 @@ export default function LoginPage() {
                     <span>Signing in...</span>
                   </>
                 ) : (
-                  <span>Sign In to Placement Console</span>
+                  <span>Sign In</span>
                 )}
               </button>
             </div>
           </form>
 
-          {/* Quick Fill Drawer for QA & Local Testing */}
-          <div className="mt-8 pt-6 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => setShowDemoCredentials(!showDemoCredentials)}
-              className="w-full flex items-center justify-between text-xs text-gray-500 hover:text-gray-700 font-medium py-1"
-            >
-              <span className="flex items-center space-x-1.5">
-                <Award className="w-3.5 h-3.5 text-amber-500" />
-                <span>Development &amp; Testing Accounts</span>
+          {/* Minimal Quick-Fill Testing Shortcuts */}
+          <div className="mt-8 pt-5 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-[11px] font-semibold tracking-wider text-gray-400 uppercase flex items-center space-x-1">
+                <Sparkles className="w-3 h-3 text-[#FECC00]" />
+                <span>Demo Accounts</span>
               </span>
-              {showDemoCredentials ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
+            </div>
 
-            {showDemoCredentials && (
-              <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200 text-xs space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-gray-800">TPO Administrator</div>
-                    <div className="text-gray-500 text-[11px]">tpo@dkte.ac.in</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => fillCredentials('tpo@dkte.ac.in', 'Admin@1234')}
-                    className="px-2 py-1 bg-white border border-gray-300 hover:border-gray-400 rounded text-gray-700 font-medium text-[11px]"
-                  >
-                    Quick Fill
-                  </button>
-                </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={fillStudentDemo}
+                className="px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-left transition-colors"
+              >
+                <div className="text-xs font-semibold text-gray-800">Student</div>
+                <div className="text-[10px] text-gray-500 font-mono">2023CSE001</div>
+              </button>
 
-                <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-                  <div>
-                    <div className="font-semibold text-gray-800">Student Account</div>
-                    <div className="text-gray-500 text-[11px]">student@dkte.ac.in</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => fillCredentials('student@dkte.ac.in', 'Student@1234')}
-                    className="px-2 py-1 bg-white border border-gray-300 hover:border-gray-400 rounded text-gray-700 font-medium text-[11px]"
-                  >
-                    Quick Fill
-                  </button>
-                </div>
-              </div>
-            )}
+              <button
+                type="button"
+                onClick={fillTpoDemo}
+                className="px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-left transition-colors"
+              >
+                <div className="text-xs font-semibold text-gray-800">TPO Admin</div>
+                <div className="text-[10px] text-gray-500 font-mono">tpo@dkte.ac.in</div>
+              </button>
+            </div>
           </div>
 
           {/* Subdued Security Disclaimer */}
-          <div className="mt-6 text-center text-xs text-gray-400">
+          <div className="mt-6 text-center text-[11px] text-gray-400">
             Official institutional access. Authorized personnel and students only.
           </div>
         </div>

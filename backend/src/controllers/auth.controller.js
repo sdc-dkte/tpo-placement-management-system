@@ -5,12 +5,13 @@ const jwt = require("jsonwebtoken");
 
 const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const identifier = (req.body.email || req.body.identifier || req.body.PRN || "").trim();
+        const { password, role } = req.body;
 
-        if (!email || !password) {
+        if (!identifier || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required.",
+                message: "Email/PRN and password are required.",
             });
         }
 
@@ -23,17 +24,40 @@ const login = async (req, res) => {
             });
         }
 
-        const user = await prisma.user.findUnique({
-            where: { email: email.trim().toLowerCase() },
+        // 1. Look up user by institutional email
+        let user = await prisma.user.findUnique({
+            where: { email: identifier.toLowerCase() },
+            include: { studentProfile: true },
         });
+
+        // 2. If not found by email, check if identifier is a student PRN
+        if (!user) {
+            const student = await prisma.student.findUnique({
+                where: { PRN: identifier },
+                include: { user: true },
+            });
+
+            if (student && student.user) {
+                user = { ...student.user, studentProfile: student };
+            }
+        }
 
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password.",
+                message: "Invalid credentials. Please verify your email/PRN and password.",
             });
         }
 
+        // 3. If a specific portal role was requested (TPO vs STUDENT), verify role match
+        if (role && user.role !== role) {
+            return res.status(403).json({
+                success: false,
+                message: `This account is registered as ${user.role}.`,
+            });
+        }
+
+        // 4. Verify password
         const passwordMatches = await bcrypt.compare(
             password,
             user.passwordHash
@@ -42,7 +66,7 @@ const login = async (req, res) => {
         if (!passwordMatches) {
             return res.status(401).json({
                 success: false,
-                message: "Invalid email or password.",
+                message: "Invalid email/PRN or password.",
             });
         }
 

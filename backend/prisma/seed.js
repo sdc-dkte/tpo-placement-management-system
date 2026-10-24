@@ -53,13 +53,15 @@ async function main() {
 
     // 3. Seed Demo Student Account
     const studentEmail = "student@dkte.ac.in";
-    const studentPassword = "Student@1234";
+    const studentPRN = "2023CSE001";
+    const studentPassword = studentPRN; // PRN as default password
+    const studentPasswordHash = await bcrypt.hash(studentPassword, 12);
+
     const existingStudent = await prisma.user.findUnique({
         where: { email: studentEmail },
     });
 
     if (!existingStudent && cseDept) {
-        const studentPasswordHash = await bcrypt.hash(studentPassword, 12);
         const studentUser = await prisma.user.create({
             data: {
                 name: "Rahul Patil",
@@ -72,7 +74,7 @@ async function main() {
         await prisma.student.create({
             data: {
                 userId: studentUser.id,
-                PRN: "2023CSE001",
+                PRN: studentPRN,
                 departmentId: cseDept.id,
                 graduationYear: 2026,
                 academicPathway: "HSC",
@@ -82,9 +84,13 @@ async function main() {
                 activeBacklogs: 0,
             },
         });
-        console.log(`Demo Student account created: ${studentEmail}`);
-    } else {
-        console.log("Student account already exists or department missing.");
+        console.log(`Demo Student account created: ${studentEmail} (Password: ${studentPassword})`);
+    } else if (existingStudent) {
+        await prisma.user.update({
+            where: { id: existingStudent.id },
+            data: { passwordHash: studentPasswordHash },
+        });
+        console.log(`Demo Student password updated to PRN: ${studentPassword}`);
     }
 }
 
