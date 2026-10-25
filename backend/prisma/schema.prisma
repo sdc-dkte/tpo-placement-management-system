@@ -308,6 +308,7 @@ model EmailCampaign {
   confirmedAt     DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
+  cancellationReason String?
 
   drive      PlacementDrive   @relation(fields: [driveId], references: [id])
   createdBy  User             @relation(fields: [createdByUserId], references: [id])
