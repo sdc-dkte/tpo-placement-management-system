@@ -277,9 +277,25 @@ const deleteJobRole = async (req, res) => {
       where: { id: jobRoleId },
     });
 
-    return res.status(204).send();
+      return res.status(204).send();
   } catch (error) {
     console.error("Delete job role error:", error);
+
+    if (error.code === "P2025") {
+      return res.status(404).json({
+        success: false,
+        message: "Job role not found.",
+      });
+    }
+
+    if (error.code === "P2003" || error.code === "P2014") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Cannot delete this job role because it is referenced by another record.",
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Failed to delete job role.",

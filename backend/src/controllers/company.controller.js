@@ -4,12 +4,28 @@ const prisma = require("../prismaClient");
 
 const getCompanies = async (req, res) => {
   try {
-    const search = (req.query.search || "").trim();
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(
-      100,
-      Math.max(1, parseInt(req.query.limit, 10) || 20)
-    );
+    const search =
+      typeof req.query.search === "string"
+        ? req.query.search.trim()
+        : "";
+
+    const pageValue = req.query.page;
+    const limitValue = req.query.limit;
+
+    const page = pageValue === undefined ? 1 : Number(pageValue);
+    const limit = limitValue === undefined ? 20 : Number(limitValue);
+if (
+  !Number.isInteger(page) ||
+  page < 1 ||
+  !Number.isInteger(limit) ||
+  limit < 1 ||
+  limit > 100
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Page must be a positive integer and limit must be between 1 and 100.",
+  });
+}
 
     // Build filters for company name and active status
     const where = {
@@ -103,11 +119,18 @@ const createCompany = async (req, res) => {
       });
     }
 
-    const cleanName = name.trim();
-    const cleanWebsite =
-      typeof website === "string" && website.trim()
-        ? website.trim()
-        : null;
+if (website !== undefined && website !== null &&
+    typeof website !== "string") {
+  return res.status(400).json({
+    success: false,
+    message: "Website must be a string or null.",
+  });
+}
+
+const cleanWebsite =
+  typeof website === "string" && website.trim()
+    ? website.trim()
+    : null;
 
     // Validate website URL
     if (cleanWebsite) {
@@ -126,6 +149,16 @@ const createCompany = async (req, res) => {
     }
 
     // Create company with the supplied active status
+   if (description !== undefined && description !== null &&
+    typeof description !== "string") {
+  return res.status(400).json({
+    success: false,
+    message: "Description must be a string or null.",
+  });
+    }
+
+    const cleanName = name.trim();
+
     const company = await prisma.company.create({
       data: {
         name: cleanName,
@@ -344,11 +377,25 @@ const getCompanyPlacements = async (req, res) => {
     }
 
     // Read pagination values from the query string
-    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(
-      100,
-      Math.max(1, Number.parseInt(req.query.limit, 10) || 20)
-    );
+    const pageValue = req.query.page;
+const limitValue = req.query.limit;
+
+const page = pageValue === undefined ? 1 : Number(pageValue);
+const limit = limitValue === undefined ? 20 : Number(limitValue);
+
+if (
+  !Number.isInteger(page) ||
+  page < 1 ||
+  !Number.isInteger(limit) ||
+  limit < 1 ||
+  limit > 100
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Page must be a positive integer and limit must be between 1 and 100.",
+  });
+}
     const skip = (page - 1) * limit;
 
     const where = {
