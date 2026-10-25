@@ -53,6 +53,13 @@ const createCampaign = async (req, res) => {
             })
         }
 
+        if (!req.user?.id) {
+            return res.status(401).json({
+                success: false,
+                message: "User authentication required",
+            })
+        }
+
         //create a draft campaign
         const campaign = await prisma.emailCampaign.create({
             data: {
