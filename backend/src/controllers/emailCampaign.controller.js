@@ -197,7 +197,74 @@ const getAllCampaigns = async (req, res) => {
     }
 }
 
+const getCampaignById = async (req, res) => {
+    try {
+        const campaignId = Number(req.params.campaignId);
+
+        //validate campaign ID
+        if(!Number.isInteger(campaignId) || campaignId <= 0){
+            return res.status(400).json({
+                success: false,
+                message: "campaignId must be a positive integer",
+            })
+        }
+
+        //fetch campaign details
+        const campaign = await prisma.emailCampaign.findUnique({
+            where: {
+                id: campaignId,
+            },
+            include: {
+                recipients: {
+                    select: {
+                        status: true,
+                    },
+                },
+            },
+        })
+
+        //check whether campaign exists
+        if(!campaign){
+            return res.status(404).json({
+                success: false,
+                message: "email campaign not found",
+            })
+        }
+
+        //calculate recipient statistics
+        const recipientCount = campaign.recipients.length
+
+        const sentCount = campaign.recipients.filter(
+            (recipient) => recipient.status === "SENT"
+        ).length
+        const failedCount = campaign.recipients.filter(
+            (recipient) => recipient.status === "FAILED"
+        ).length
+
+        const { recipients, ...campaignDetails } = campaign
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                ...campaignDetails,
+                recipientCount,
+                sentCount,
+                failedCount,
+            },
+        })
+    }
+    catch(error){
+        // console.error("Get email campaign error:", error)
+
+        return res.status(500).json({
+            success: false,
+            message: "failed to retrieve email campaign",
+        })
+    }
+}
+
 module.exports = {
     createCampaign,
     getAllCampaigns,
+    getCampaignById
 }
