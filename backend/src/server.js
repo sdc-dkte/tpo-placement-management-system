@@ -10,7 +10,7 @@ const prisma = require("./prismaClient");
 const healthRoutes = require("./routes/health.routes");
 const authRoutes = require("./routes/auth.routes");
 const importRoutes = require("./routes/import.routes");
-// const studentRoutes = require("./routes/student.routes");
+const studentRoutes = require("./routes/student.routes");
 // const companyRoutes = require("./routes/company.routes");
 // const jobRoleRoutes = require("./routes/jobRole.routes");
 // const driveRoutes = require("./routes/drive.routes");
@@ -18,11 +18,14 @@ const importRoutes = require("./routes/import.routes");
 // const participationRoutes = require("./routes/participation.routes");
 // const selectionRoutes = require("./routes/selection.routes");
 // const placementRoutes = require("./routes/placement.routes");
-// const dashboardRoutes = require("./routes/dashboard.routes");
+const dashboardRoutes = require("./routes/dashboard.routes");
 // const reportRoutes = require("./routes/report.routes");
 // const documentRoutes = require("./routes/document.routes");
+
 const emailCampaignRoutes = require("./routes/emailCampaign.routes");
-// const departmentRoutes = require("./routes/department.routes");
+const departmentRoutes = require("./routes/department.routes");
+
+
 
 const app = express();
 
@@ -59,7 +62,7 @@ app.get("/", (req, res) => {
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/import", importRoutes);
-// app.use("/api/v1/students", studentRoutes);
+app.use("/api/v1/students", studentRoutes);
 // app.use("/api/v1/companies", companyRoutes);
 // app.use("/api/v1/job-roles", jobRoleRoutes);
 // app.use("/api/v1/drives", driveRoutes);
@@ -67,11 +70,13 @@ app.use("/api/v1/import", importRoutes);
 // app.use("/api/v1/participation", participationRoutes);
 // app.use("/api/v1/selections", selectionRoutes);
 // app.use("/api/v1/placements", placementRoutes);
-// app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
 // app.use("/api/v1/reports", reportRoutes);
 // app.use("/api/v1/documents", documentRoutes);
+
 app.use("/api/v1/email-campaigns", emailCampaignRoutes);
-// app.use("/api/v1/departments", departmentRoutes);
+app.use("/api/v1/departments", departmentRoutes);
+
 
 // ====================
 // 4. Not Found Handler
