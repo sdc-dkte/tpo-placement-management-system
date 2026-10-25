@@ -3,7 +3,6 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-
 const prisma = require("./prismaClient");
 
 // Routes
@@ -20,7 +19,7 @@ const importRoutes = require("./routes/import.routes");
 // const placementRoutes = require("./routes/placement.routes");
 // const dashboardRoutes = require("./routes/dashboard.routes");
 // const reportRoutes = require("./routes/report.routes");
-// const documentRoutes = require("./routes/document.routes");
+const documentRoutes = require("./routes/document.routes");
 // const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 // const departmentRoutes = require("./routes/department.routes");
 
@@ -69,7 +68,7 @@ app.use("/api/v1/import", importRoutes);
 // app.use("/api/v1/placements", placementRoutes);
 // app.use("/api/v1/dashboard", dashboardRoutes);
 // app.use("/api/v1/reports", reportRoutes);
-// app.use("/api/v1/documents", documentRoutes);
+app.use("/api/v1/documents", documentRoutes);
 // app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 // app.use("/api/v1/departments", departmentRoutes);
 
