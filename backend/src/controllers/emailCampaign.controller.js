@@ -121,7 +121,8 @@ const getAllCampaigns = async (req, res) => {
                 "DRAFT",
                 "QUEUED",
                 "SENDING",
-                "SENT",
+                "COMPLETED",
+                "COMPLETED_WITH_FAILURES",
                 "FAILED",
                 "CANCELLED",
             ]
