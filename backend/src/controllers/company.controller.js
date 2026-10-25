@@ -192,7 +192,7 @@ const cleanWebsite =
   }
 };
 
-// 3. Get company details, roles, drives, and official selections
+// 3. Get company details, job roles, and placement drives
 const getCompanyById = async (req, res) => {
   try {
     const companyId = Number(req.params.companyId);
