@@ -88,6 +88,116 @@ const createCampaign = async (req, res) => {
     }
 }
 
+const getAllCampaigns = async (req, res) => {
+    try {
+        const page = Number.parseInt(req.query.page, 10) || 1
+        const limit = Number.parseInt(req.query.limit, 10) || 20
+        const { driveId, status } = req.query
+
+        //validate pagination
+        if(!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100){
+            return res.status(400).json({
+                success: false,
+                message: "page must be positive and limit must be between 1 and 100",
+            })
+        }
+
+        //build filters
+        const where = {};
+
+        if(driveId !== undefined){
+            const parsedDriveId = Number(driveId);
+            if(!Number.isInteger(parsedDriveId) || parsedDriveId <= 0){
+                return res.status(400).json({
+                    success: false,
+                    message: "driveId must be a positive integer",
+                })
+            }
+
+            where.driveId = parsedDriveId;
+        }
+        if(status !== undefined){
+            const allowedStatuses = [
+                "DRAFT",
+                "QUEUED",
+                "SENDING",
+                "SENT",
+                "FAILED",
+                "CANCELLED",
+            ]
+            if(!allowedStatuses.includes(status)){
+                return res.status(400).json({
+                    success: false,
+                    message: "invalid campaign status",
+                })
+            }
+
+            where.status = status;
+        }
+
+        const skip = (page - 1) * limit;
+
+        //fetch campaigns and total count
+        const [campaigns, total] = await Promise.all([
+            prisma.emailCampaign.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: {
+                    createdAt: "desc",
+                },
+                include: {
+                    recipients: {
+                        select: {
+                            status: true,
+                        },
+                    },
+                },
+            }),
+            prisma.emailCampaign.count({ where }),
+        ])
+
+        //calculate recipient stats
+        const data = campaigns.map((campaign) => {
+            const recipientCount = campaign.recipients.length
+            const sentCount = campaign.recipients.filter(
+                (recipient) => recipient.status === "SENT"
+            ).length
+            const failedCount = campaign.recipients.filter(
+                (recipient) => recipient.status === "FAILED"
+            ).length
+
+            const { recipients, ...campaignDetails } = campaign
+
+            return {
+                ...campaignDetails,
+                recipientCount,
+                sentCount,
+                failedCount,
+            }
+        })
+
+        return res.status(200).json({
+            data,
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit),
+            },
+        })
+    } 
+    catch(error){
+        // console.error("Get email campaigns error:", error)
+
+        return res.status(500).json({
+            success: false,
+            message: "failed to retrieve email campaigns",
+        })
+    }
+}
+
 module.exports = {
     createCampaign,
+    getAllCampaigns,
 }
