@@ -21,8 +21,11 @@ const studentRoutes = require("./routes/student.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 // const reportRoutes = require("./routes/report.routes");
 // const documentRoutes = require("./routes/document.routes");
-// const emailCampaignRoutes = require("./routes/emailCampaign.routes");
+
+const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 const departmentRoutes = require("./routes/department.routes");
+
+
 
 const app = express();
 
@@ -70,8 +73,10 @@ app.use("/api/v1/students", studentRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 // app.use("/api/v1/reports", reportRoutes);
 // app.use("/api/v1/documents", documentRoutes);
-// app.use("/api/v1/email-campaigns", emailCampaignRoutes);
+
+app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 app.use("/api/v1/departments", departmentRoutes);
+
 
 // ====================
 // 4. Not Found Handler
