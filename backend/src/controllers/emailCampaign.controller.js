@@ -263,8 +263,109 @@ const getCampaignById = async (req, res) => {
     }
 }
 
+const updateCampaign = async (req, res) => {
+    try {
+        const campaignId = Number(req.params.campaignId)
+        const { subject, body } = req.body
+
+        //validate campaign ID
+        if(!Number.isInteger(campaignId) || campaignId <= 0){
+            return res.status(400).json({
+                success: false,
+                message: "campaignId must be a positive integer",
+            })
+        }
+
+        //validate that at least one field is provided
+        if(subject === undefined && body === undefined){
+            return res.status(400).json({
+                success: false,
+                message: "at least one of subject or body must be provided",
+            })
+        }
+
+        const data = {};
+
+        //validate subject if provided
+        if(subject !== undefined){
+            if(typeof subject !== "string" || !subject.trim()){
+                return res.status(422).json({
+                    success: false,
+                    message: "subject should be present",
+                })
+            }
+
+            data.subject = subject.trim()
+        }
+
+        //validate body if provided
+        if(body !== undefined){
+            if(typeof body !== "string" || !body.trim()){
+                return res.status(422).json({
+                    success: false,
+                    message: "email body cannot be empty",
+                })
+            }
+
+            data.body = body.trim()
+        }
+
+        //check that campaign exists
+        const campaign = await prisma.emailCampaign.findUnique({
+            where: { id: campaignId },
+            select: {
+                id: true,
+                status: true,
+            },
+        })
+
+        if(!campaign){
+            return res.status(404).json({
+                success: false,
+                message: "email campaign not found",
+            })
+        }
+
+        //only drafts can be edited
+        if(campaign.status !== "DRAFT"){
+            return res.status(409).json({
+                success: false,
+                message: "only draft campaigns can be edited",
+            })
+        }
+
+        //update campaign
+        const updatedCampaign = await prisma.emailCampaign.update({
+            where: { id: campaignId },
+            data,
+            select: {
+                id: true,
+                driveId: true,
+                subject: true,
+                body: true,
+                status: true,
+                createdAt: true,
+            },
+        })
+
+        return res.status(200).json({
+            success: true,
+            data: updatedCampaign,
+        })
+    }
+    catch(error){
+        // console.error("Update email campaign error:", error)
+
+        return res.status(500).json({
+            success: false,
+            message: "failed to update email campaign",
+        })
+    }
+}
+
 module.exports = {
     createCampaign,
     getAllCampaigns,
-    getCampaignById
+    getCampaignById,
+    updateCampaign,
 }
