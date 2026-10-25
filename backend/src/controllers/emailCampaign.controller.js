@@ -363,9 +363,97 @@ const updateCampaign = async (req, res) => {
     }
 }
 
+const cancelCampaign = async (req, res) => {
+  try {
+    const campaignId = Number(req.params.campaignId)
+    const { reason } = req.body
+
+    //validate campaign ID
+    if(!Number.isInteger(campaignId) || campaignId <= 0){
+      return res.status(400).json({
+        success: false,
+        message: "invalid campaign ID",
+      })
+    }
+
+    //validate cancellation reason
+    if(typeof reason !== "string" || reason.trim().length === 0){
+      return res.status(400).json({
+        success: false,
+        message: "cancellation reason is required",
+      })
+    }
+
+    //cancel only DRAFT or QUEUED campaigns
+    const result = await prisma.emailCampaign.updateMany({
+      where: {
+        id: campaignId,
+        status: {
+          in: ["DRAFT", "QUEUED"],
+        },
+      },
+      data: {
+        status: "CANCELLED",
+        cancellationReason: reason.trim(),
+      },
+    })
+
+    //if no campaign was updated, determine why
+    if(result.count === 0){
+      const campaign = await prisma.emailCampaign.findUnique({
+        where: { id: campaignId },
+        select: {
+          id: true,
+          status: true,
+        },
+      })
+
+      if(!campaign){
+        return res.status(404).json({
+          success: false,
+          message: "email campaign not found",
+        })
+      }
+
+      return res.status(409).json({
+        success: false,
+        message: `campaign cannot be cancelled because its status is ${campaign.status}`,
+      })
+    }
+
+    //fetch the updated campaign
+    const cancelledCampaign = await prisma.emailCampaign.findUnique({
+      where: { id: campaignId },
+      select: {
+        id: true,
+        driveId: true,
+        subject: true,
+        status: true,
+        cancellationReason: true,
+        createdAt: true,
+      },
+    })
+
+    return res.status(200).json({
+      success: true,
+      message: "email campaign cancelled successfully",
+      data: cancelledCampaign,
+    })
+  } 
+  catch(error){
+    // console.error("Error cancelling email campaign:", error)
+
+    return res.status(500).json({
+      success: false,
+      message: "internal server error",
+    })
+  }
+}
+
 module.exports = {
     createCampaign,
     getAllCampaigns,
     getCampaignById,
     updateCampaign,
+    cancelCampaign,
 }
