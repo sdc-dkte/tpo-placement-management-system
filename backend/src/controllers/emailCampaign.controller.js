@@ -311,34 +311,41 @@ const updateCampaign = async (req, res) => {
             data.body = body.trim()
         }
 
-        //check that campaign exists
-        const campaign = await prisma.emailCampaign.findUnique({
-            where: { id: campaignId },
-            select: {
-                id: true,
-                status: true,
+        //update only if the campaign exists and is still a DRAFT
+        const result = await prisma.emailCampaign.updateMany({
+            where: {
+                id: campaignId,
+                status: "DRAFT",
             },
-        })
+            data,
+        });
 
-        if(!campaign){
-            return res.status(404).json({
-                success: false,
-                message: "email campaign not found",
+        //if no campaign was updated then determine the reason
+        if(result.count === 0){
+
+            //check that campaign exists
+            const campaign = await prisma.emailCampaign.findUnique({
+                where: { id: campaignId },
+                select: {
+                    id: true,
+                    status: true,
+                },
             })
-        }
-
-        //only drafts can be edited
-        if(campaign.status !== "DRAFT"){
+            if(!campaign){
+                return res.status(404).json({
+                    success: false,
+                    message: "email campaign not found",
+                })
+            }
             return res.status(409).json({
                 success: false,
                 message: "only draft campaigns can be edited",
             })
         }
 
-        //update campaign
-        const updatedCampaign = await prisma.emailCampaign.update({
+        //fetch updated campaign
+        const updatedCampaign = await prisma.emailCampaign.findUnique({
             where: { id: campaignId },
-            data,
             select: {
                 id: true,
                 driveId: true,
