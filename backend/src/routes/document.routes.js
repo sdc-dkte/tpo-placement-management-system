@@ -1,8 +1,7 @@
 const express = require("express");
-const multer = require("multer");
-const path = require("path");
 
 const allowRoles = require("../middleware/role.middleware");
+const handleDocumentUpload = require("../middleware/upload.middleware");
 
 const {
     getMyDocument,
@@ -16,69 +15,32 @@ const authenticateToken = require("../middleware/auth.middleware");
 
 const router = express.Router();
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, "uploads/documents");
-    },
-
-    filename: (req, file, cb) => {
-        const uniqueName = `${Date.now()}-${file.originalname}`;
-        cb(null, uniqueName);
-    },
-});
-
-const upload = multer({
-    storage,
-    limits: {
-        fileSize: 5 * 1024 * 1024,
-    },
-
-    fileFilter: (req, file, cb) => {
-        const allowedExtensions = [
-            ".pdf",
-            ".jpg",
-            ".jpeg",
-            ".png",
-        ];
-
-        const extension = path
-            .extname(file.originalname)
-            .toLowerCase();
-
-        if (!allowedExtensions.includes(extension)) {
-            return cb(
-                new Error(
-                    "Only PDF, JPG, JPEG and PNG files are allowed."
-                )
-            );
-        }
-
-        cb(null, true);
-    },
-});
-
 router.get(
     "/student",
     authenticateToken,
+    allowRoles("STUDENT"),
     getMyDocument
 );
 
 router.post(
     "/student",
     authenticateToken,
-    upload.single("file"),
+    allowRoles("STUDENT"),
+    handleDocumentUpload,
     uploadDocument
 );
 
 router.delete(
     "/student/:id",
     authenticateToken,
+    allowRoles("STUDENT"),
     deleteDocument
 );
 
 router.get(
     "/:id/download",
     authenticateToken,
+    allowRoles("TPO", "STUDENT"),
     downloadDocument
 );
 
