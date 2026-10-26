@@ -1,9 +1,13 @@
 const prisma = require("../prismaClient");
 const fs = require("fs/promises");
 const {
+    cleanupPendingDocumentFiles,
     isRealPathInsideUploadDirectory,
+    removeStagedDocumentFile,
     removeUploadedFile,
+    restoreStagedDocumentFile,
     resolveDocumentPath,
+    stageDocumentFileForDeletion,
 } = require("../utils/documentFiles");
 
 const SUPPORTED_DOCUMENT_TYPES = new Set([
@@ -179,28 +183,39 @@ const deleteDocument = async (req, res) => {
             });
         }
 
+        await cleanupPendingDocumentFiles();
+        const stagedFile = await stageDocumentFileForDeletion(filePath);
+
         try {
-            const actualPath = await fs.realpath(filePath);
-            if (!(await isRealPathInsideUploadDirectory(actualPath))) {
+            await prisma.studentDocument.delete({
+                where: {
+                    id: document.id,
+                },
+            });
+        } catch (error) {
+            try {
+                await restoreStagedDocumentFile(stagedFile);
+            } catch (restoreError) {
+                console.error(
+                    `Failed to restore document file after database deletion failed. Recovery file: ${stagedFile?.stagedPath}`,
+                    restoreError
+                );
                 return res.status(500).json({
                     success: false,
-                    message: "Document file path is invalid on server.",
+                    message:
+                        "Failed to delete document. File restoration is pending recovery.",
                 });
             }
-            await fs.unlink(filePath);
-        } catch (error) {
-            if (error.code !== "ENOENT") throw error;
+            throw error;
         }
 
-        await prisma.studentDocument.delete({
-            where: {
-                id: document.id,
-            },
-        });
+        const fileCleanupComplete = await removeStagedDocumentFile(stagedFile);
 
         return res.status(200).json({
             success: true,
-            message: "Document deleted successfully.",
+            message: fileCleanupComplete
+                ? "Document deleted successfully."
+                : "Document deleted successfully. File cleanup is pending and will be retried.",
         });
     } catch (error) {
         console.error("Error deleting document:", error);

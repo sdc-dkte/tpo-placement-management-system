@@ -15,6 +15,7 @@ process.env.DOCUMENT_UPLOAD_DIR = uploadDirectory;
 
 const state = {
     createError: null,
+    deleteError: null,
     document: null,
     findManyArgs: null,
     student: { id: 1 },
@@ -37,7 +38,11 @@ const prisma = {
             return [];
         },
         count: async () => 0,
-        delete: async () => state.document,
+        delete: async () => {
+            if (state.deleteError) throw state.deleteError;
+            state.document = null;
+            return null;
+        },
     },
 };
 
@@ -89,6 +94,7 @@ before(async () => {
 
 beforeEach(() => {
     state.createError = null;
+    state.deleteError = null;
     state.document = null;
     state.findManyArgs = null;
     state.student = { id: 1 };
@@ -218,6 +224,55 @@ test("prevents students from downloading another student's document", async () =
     });
 
     assert.equal(response.status, 403);
+});
+
+test("restores the document file when database deletion fails", async () => {
+    const fileName = "delete-failure.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    const content = "%PDF-file to retain";
+    await fs.writeFile(filePath, content);
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
+    };
+    state.deleteError = new Error("database unavailable");
+
+    const response = await fetch(`${baseUrl}/documents/student/7`, {
+        method: "DELETE",
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(state.document.id, 7);
+    assert.equal(await fs.readFile(filePath, "utf8"), content);
+    assert.deepEqual(
+        (await currentFiles()).filter((name) => name.startsWith(".pending-delete-")),
+        []
+    );
+});
+
+test("retries cleanup of files queued by a previous failed cleanup", async () => {
+    const pendingPath = path.join(
+        uploadDirectory,
+        ".pending-delete-recovery-test"
+    );
+    await fs.writeFile(pendingPath, "%PDF-pending cleanup");
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName: "missing.pdf",
+        fileUrl: "/uploads/documents/missing.pdf",
+    };
+
+    const response = await fetch(`${baseUrl}/documents/student/7`, {
+        method: "DELETE",
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 200);
+    await assert.rejects(fs.access(pendingPath), { code: "ENOENT" });
 });
 
 test("validates document IDs as positive integers", async () => {
