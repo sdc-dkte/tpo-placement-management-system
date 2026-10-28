@@ -25,6 +25,8 @@ model User {
   passwordHash String
   role         Role     @default(STUDENT)
   createdAt    DateTime @default(now())
+  mustChangePassword Boolean @default(true)
+  isActive Boolean @default(true)
 
   studentProfile    Student?
   academicImports   AcademicImportBatch[]
