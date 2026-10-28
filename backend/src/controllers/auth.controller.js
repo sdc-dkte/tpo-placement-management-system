@@ -34,6 +34,13 @@ const login = async (req, res) => {
             });
         }
 
+        if (!user.isActive) {
+            return res.status(403).json({
+                success: false,
+                message: "Your account has been deactivated. Contact the TPO."
+            });
+        }
+
         const passwordMatches = await bcrypt.compare(
             password,
             user.passwordHash
@@ -186,7 +193,10 @@ const changePassword = async (req, res) => {
 
         await prisma.user.update({
             where: { id: user.id },
-            data: { passwordHash },
+            data: {
+                passwordHash,
+                mustChangePassword: false
+            },
         });
 
         return res.status(200).json({

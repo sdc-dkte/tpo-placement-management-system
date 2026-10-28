@@ -1,27 +1,262 @@
-
 const prisma = require("../prismaClient");
+const bcrypt = require("bcrypt");
+const { Prisma } = require("@prisma/client");
 
-// GET /api/v1/students
-// TPO: List, search, filter, and paginate students.
-const getStudents = async (req, res) => {
+const PATHWAYS = ["HSC", "DIPLOMA"];
+
+const isValidText = (value) =>
+    typeof value === "string" && value.trim().length > 0;
+
+const isValidPercentage = (value) =>
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100;
+
+const validateAcademicFields = (body) => {
+    const errors = [];
+
+    if (
+        body.CGPA !== undefined &&
+        body.CGPA !== null &&
+        (
+            typeof body.CGPA !== "number" ||
+            !Number.isFinite(body.CGPA) ||
+            body.CGPA < 0 ||
+            body.CGPA > 10
+        )
+    ) {
+        errors.push("CGPA must be between 0 and 10");
+    }
+
+    for (const field of [
+        "tenthPercentage",
+        "twelfthPercentage",
+        "diplomaPercentage",
+    ]) {
+        if (
+            body[field] !== undefined &&
+            body[field] !== null &&
+            !isValidPercentage(body[field])
+        ) {
+            errors.push(`${field} must be between 0 and 100`);
+        }
+    }
+
+    if (
+        body.activeBacklogs !== undefined &&
+        (
+            !Number.isInteger(body.activeBacklogs) ||
+            body.activeBacklogs < 0
+        )
+    ) {
+        errors.push("activeBacklogs must be a non-negative integer");
+    }
+
+    if (
+        body.graduationYear !== undefined &&
+        (
+            !Number.isInteger(body.graduationYear) ||
+            body.graduationYear < 2000
+        )
+    ) {
+        errors.push("Invalid graduationYear");
+    }
+
+    if (
+        body.academicPathway !== undefined &&
+        !PATHWAYS.includes(body.academicPathway)
+    ) {
+        errors.push("academicPathway must be HSC or DIPLOMA");
+    }
+
+    return errors;
+};
+
+// POST /api/v1/students
+// TPO: Create a student and linked login account.
+const createStudent = async (req, res) => {
     try {
-        const page = Number(req.query.page ?? 1);
-        const limit = Number(req.query.limit ?? 20);
+        const {
+            name,
+            email,
+            PRN,
+            departmentId,
+            graduationYear,
+            academicPathway,
+            CGPA,
+            tenthPercentage,
+            twelfthPercentage,
+            diplomaPercentage,
+            activeBacklogs,
+        } = req.body;
 
         if (
-            !Number.isInteger(page) ||
-            !Number.isInteger(limit) ||
-            page < 1 ||
-            limit < 1 ||
-            limit > 100
+            !isValidText(name) ||
+            !isValidText(email) ||
+            !isValidText(PRN)
         ) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid pagination. Page must be positive and limit must be between 1 and 100.",
+                message: "Name, email, password and PRN are required",
             });
         }
 
+
+
+        const normalizedEmail = email.trim().toLowerCase();
+        const normalizedPRN = PRN.trim();
+        const normalizedName = name.trim();
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid email address",
+            });
+        }
+
+        if (
+            !Number.isInteger(departmentId) ||
+            departmentId <= 0 ||
+            !Number.isInteger(graduationYear) ||
+            graduationYear < 2000 ||
+            !PATHWAYS.includes(academicPathway)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid department, graduation year or pathway",
+            });
+        }
+
+        const errors = validateAcademicFields(req.body);
+
+        if (errors.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Validation failed",
+                errors,
+            });
+        }
+
+        // HSC students require 12th marks; Diploma students require
+        // diploma marks. Irrelevant pathway marks are stored as null.
+        if (
+            academicPathway === "HSC" &&
+            !isValidPercentage(twelfthPercentage)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid twelfthPercentage is required for HSC",
+            });
+        }
+
+        if (
+            academicPathway === "DIPLOMA" &&
+            !isValidPercentage(diplomaPercentage)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid diplomaPercentage is required for DIPLOMA",
+            });
+        }
+
+        const department = await prisma.department.findUnique({
+            where: { id: departmentId },
+            select: { id: true },
+        });
+
+        if (!department) {
+            return res.status(400).json({
+                success: false,
+                message: "Department not found",
+            });
+        }
+
+        const passwordHash = await bcrypt.hash(PRN.trim(), 12);
+
+        const student = await prisma.$transaction(async (tx) => {
+            return tx.student.create({
+                data: {
+                    PRN: normalizedPRN,
+                    departmentId,
+                    graduationYear,
+                    academicPathway,
+                    CGPA: CGPA ?? null,
+                    tenthPercentage: tenthPercentage ?? null,
+                    twelfthPercentage:
+                        academicPathway === "HSC"
+                            ? twelfthPercentage
+                            : null,
+                    diplomaPercentage:
+                        academicPathway === "DIPLOMA"
+                            ? diplomaPercentage
+                            : null,
+                    activeBacklogs: activeBacklogs ?? 0,
+
+                    user: {
+                        create: {
+                            name: normalizedName,
+                            email: normalizedEmail,
+                            passwordHash,
+                            role: "STUDENT",
+                            mustChangePassword: true
+                        },
+                    },
+                },
+                select: {
+                    id: true,
+                    PRN: true,
+                    departmentId: true,
+                    graduationYear: true,
+                    academicPathway: true,
+                    CGPA: true,
+                    tenthPercentage: true,
+                    twelfthPercentage: true,
+                    diplomaPercentage: true,
+                    activeBacklogs: true,
+                    user: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            role: true,
+                            mustChangePassword: true
+                        },
+                    },
+                },
+            });
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Student created successfully",
+            data: student,
+        });
+    } catch (error) {
+        if (error.code === "P2002") {
+            return res.status(409).json({
+                success: false,
+                message: "Email or PRN already exists",
+            });
+        }
+
+        console.error("Create student error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create student",
+        });
+    }
+};
+
+
+
+
+const getStudents = async (req, res) => {
+    try {
         const {
+            page: rawPage = "1",
+            limit: rawLimit = "20",
             search,
             departmentId,
             graduationYear,
@@ -29,6 +264,25 @@ const getStudents = async (req, res) => {
             maxBacklogs,
             sortOrder = "asc",
         } = req.query;
+
+        // Strict pagination validation
+        const isPositiveInteger = (value) =>
+            /^\d+$/.test(String(value)) && Number(value) >= 1;
+
+        if (
+            !isPositiveInteger(rawPage) ||
+            !isPositiveInteger(rawLimit) ||
+            Number(rawLimit) > 100
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid pagination. Page must be positive and limit must be between 1 and 100.",
+            });
+        }
+
+        const page = Number(rawPage);
+        const limit = Number(rawLimit);
 
         if (!["asc", "desc"].includes(sortOrder)) {
             return res.status(400).json({
@@ -39,89 +293,150 @@ const getStudents = async (req, res) => {
 
         const where = {};
 
-        if (search && search.trim()) {
+        // Search by PRN, name, or email
+        if (search !== undefined) {
+            if (typeof search !== "string" || search.length > 100) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Search must be a string of at most 100 characters.",
+                });
+            }
+
             const term = search.trim();
 
-            where.OR = [
-                { PRN: { contains: term, mode: "insensitive" } },
-                {
-                    user: {
-                        is: {
-                            name: { contains: term, mode: "insensitive" },
+            if (term) {
+                where.OR = [
+                    {
+                        PRN: {
+                            contains: term,
+                            mode: "insensitive",
                         },
                     },
-                },
-                {
-                    user: {
-                        is: {
-                            email: { contains: term, mode: "insensitive" },
+                    {
+                        user: {
+                            is: {
+                                name: {
+                                    contains: term,
+                                    mode: "insensitive",
+                                },
+                            },
                         },
                     },
-                },
-            ];
+                    {
+                        user: {
+                            is: {
+                                email: {
+                                    contains: term,
+                                    mode: "insensitive",
+                                },
+                            },
+                        },
+                    },
+                ];
+            }
         }
 
-        if (departmentId !== undefined) {
-            const value = Number(departmentId);
+        // Validate optional numeric filters
+        const parseIntegerFilter = (value, field, min) => {
+            if (value === undefined) return null;
 
-            if (!Number.isInteger(value) || value <= 0) {
+            if (
+                typeof value !== "string" ||
+                !/^\d+$/.test(value) ||
+                Number(value) < min ||
+                !Number.isSafeInteger(Number(value))
+            ) {
+                throw new Error(`INVALID_FILTER:${field}`);
+            }
+
+            return Number(value);
+        };
+
+        const parseNumberFilter = (value, field, min, max) => {
+            if (value === undefined) return null;
+
+            if (
+                typeof value !== "string" ||
+                value.trim() === "" ||
+                !Number.isFinite(Number(value)) ||
+                Number(value) < min ||
+                Number(value) > max
+            ) {
+                throw new Error(`INVALID_FILTER:${field}`);
+            }
+
+            return Number(value);
+        };
+
+        let parsedDepartmentId;
+        let parsedGraduationYear;
+        let parsedMinCGPA;
+        let parsedMaxBacklogs;
+
+        try {
+            parsedDepartmentId = parseIntegerFilter(
+                departmentId,
+                "departmentId",
+                1
+            );
+
+            parsedGraduationYear = parseIntegerFilter(
+                graduationYear,
+                "graduationYear",
+                2000
+            );
+
+            parsedMinCGPA = parseNumberFilter(
+                minCGPA,
+                "minCGPA",
+                0,
+                10
+            );
+
+            parsedMaxBacklogs = parseIntegerFilter(
+                maxBacklogs,
+                "maxBacklogs",
+                0
+            );
+        } catch (error) {
+            if (error.message.startsWith("INVALID_FILTER:")) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid departmentId",
+                    message: `Invalid ${error.message.split(":")[1]}`,
                 });
             }
 
-            where.departmentId = value;
+            throw error;
         }
 
-        if (graduationYear !== undefined) {
-            const value = Number(graduationYear);
-
-            if (!Number.isInteger(value) || value < 2000) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid graduationYear",
-                });
-            }
-
-            where.graduationYear = value;
+        if (parsedDepartmentId !== null) {
+            where.departmentId = parsedDepartmentId;
         }
 
-        if (minCGPA !== undefined) {
-            const value = Number(minCGPA);
-
-            if (!Number.isFinite(value) || value < 0 || value > 10) {
-                return res.status(400).json({
-                    success: false,
-                    message: "minCGPA must be between 0 and 10",
-                });
-            }
-
-            where.CGPA = { gte: value };
+        if (parsedGraduationYear !== null) {
+            where.graduationYear = parsedGraduationYear;
         }
 
-        if (maxBacklogs !== undefined) {
-            const value = Number(maxBacklogs);
+        if (parsedMinCGPA !== null) {
+            where.CGPA = { gte: parsedMinCGPA };
+        }
 
-            if (!Number.isInteger(value) || value < 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "maxBacklogs must be a non-negative integer",
-                });
-            }
-
-            where.activeBacklogs = { lte: value };
+        if (parsedMaxBacklogs !== null) {
+            // Inclusive: students with exactly this many backlogs are included.
+            where.activeBacklogs = { lte: parsedMaxBacklogs };
         }
 
         const [total, students] = await Promise.all([
             prisma.student.count({ where }),
+
             prisma.student.findMany({
                 where,
                 skip: (page - 1) * limit,
                 take: limit,
-                orderBy: {
-                    user: { name: sortOrder },
-                },
+                orderBy: [
+                    { user: { name: sortOrder } },
+                    { id: "asc" },
+                ],
                 select: {
                     id: true,
                     PRN: true,
@@ -145,6 +460,7 @@ const getStudents = async (req, res) => {
                             code: true,
                         },
                     },
+                    // Keep this only if selection is a single optional relation.
                     selection: {
                         select: {
                             status: true,
@@ -186,6 +502,367 @@ const getStudents = async (req, res) => {
         });
     }
 };
+
+
+// PATCH /api/v1/students/:studentId
+// TPO: Update account and academic fields.
+const updateStudent = async (req, res) => {
+    try {
+        const studentId = Number(req.params.studentId);
+
+        if (!Number.isInteger(studentId) || studentId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid student ID",
+            });
+        }
+
+        const allowedFields = [
+            "name",
+            "email",
+            "PRN",
+            "departmentId",
+            "graduationYear",
+            "academicPathway",
+            "CGPA",
+            "tenthPercentage",
+            "twelfthPercentage",
+            "diplomaPercentage",
+            "activeBacklogs",
+        ];
+
+        const unknownFields = Object.keys(req.body).filter(
+            (field) => !allowedFields.includes(field)
+        );
+
+        if (unknownFields.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Unsupported fields",
+                errors: unknownFields,
+            });
+        }
+
+        if (Object.keys(req.body).length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Provide at least one field to update",
+            });
+        }
+
+        const errors = validateAcademicFields(req.body);
+
+        if (errors.length) {
+            return res.status(400).json({
+                success: false,
+                message: "Validation failed",
+                errors,
+            });
+        }
+
+        const existing = await prisma.student.findUnique({
+            where: { id: studentId },
+            include: { user: true },
+        });
+
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: "Student not found",
+            });
+        }
+
+        const body = req.body;
+        const pathway = body.academicPathway ?? existing.academicPathway;
+        const nextTwelfth =
+            body.twelfthPercentage !== undefined
+                ? body.twelfthPercentage
+                : existing.twelfthPercentage;
+        const nextDiploma =
+            body.diplomaPercentage !== undefined
+                ? body.diplomaPercentage
+                : existing.diplomaPercentage;
+
+        if (
+            pathway === "HSC" &&
+            !isValidPercentage(nextTwelfth)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid twelfthPercentage is required for HSC",
+            });
+        }
+
+        if (
+            pathway === "DIPLOMA" &&
+            !isValidPercentage(nextDiploma)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid diplomaPercentage is required for DIPLOMA",
+            });
+        }
+
+        if (
+            body.name !== undefined &&
+            !isValidText(body.name)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Name cannot be empty",
+            });
+        }
+
+        if (body.email !== undefined) {
+            if (
+                !isValidText(body.email) ||
+                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                    body.email.trim()
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid email address",
+                });
+            }
+        }
+
+        if (
+            body.PRN !== undefined &&
+            !isValidText(body.PRN)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "PRN cannot be empty",
+            });
+        }
+
+        const nextDepartmentId =
+            body.departmentId ?? existing.departmentId;
+
+        if (
+            body.departmentId !== undefined &&
+            (
+                !Number.isInteger(body.departmentId) ||
+                body.departmentId <= 0
+            )
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid departmentId",
+            });
+        }
+
+        if (body.departmentId !== undefined) {
+            const department = await prisma.department.findUnique({
+                where: { id: nextDepartmentId },
+                select: { id: true },
+            });
+
+            if (!department) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Department not found",
+                });
+            }
+        }
+
+        const studentFields = [
+            "PRN",
+            "departmentId",
+            "graduationYear",
+            "academicPathway",
+            "CGPA",
+            "tenthPercentage",
+            "twelfthPercentage",
+            "diplomaPercentage",
+            "activeBacklogs",
+        ];
+
+        const studentData = {};
+
+        for (const field of studentFields) {
+            if (body[field] !== undefined) {
+                studentData[field] = body[field];
+            }
+        }
+
+        if (body.PRN !== undefined) {
+            studentData.PRN = body.PRN.trim();
+        }
+
+        studentData.academicPathway = pathway;
+
+        // Keep pathway-specific marks consistent.
+        if (pathway === "HSC") {
+            studentData.diplomaPercentage = null;
+        } else {
+            studentData.twelfthPercentage = null;
+        }
+
+        const userData = {};
+
+        if (body.name !== undefined) {
+            userData.name = body.name.trim();
+        }
+
+        if (body.email !== undefined) {
+            userData.email = body.email.trim().toLowerCase();
+        }
+
+        const prnChanged =
+            body.PRN !== undefined &&
+            body.PRN.trim() !== existing.PRN;
+
+        // Reset the password only if the student still uses
+        // their initial PRN-based password.
+        if (prnChanged && existing.user.mustChangePassword) {
+            userData.passwordHash = await bcrypt.hash(
+                body.PRN.trim(),
+                12
+            );
+
+            userData.mustChangePassword = true;
+        }
+
+        const updated = await prisma.$transaction(async (tx) => {
+            await tx.user.update({
+                where: { id: existing.userId },
+                data: userData,
+            });
+
+            return tx.student.update({
+                where: { id: studentId },
+                data: studentData,
+                select: {
+                    id: true,
+                    PRN: true,
+                    departmentId: true,
+                    graduationYear: true,
+                    academicPathway: true,
+                    CGPA: true,
+                    tenthPercentage: true,
+                    twelfthPercentage: true,
+                    diplomaPercentage: true,
+                    activeBacklogs: true,
+                    user: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                        },
+                    },
+                },
+            });
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Student updated successfully",
+            data: updated,
+        });
+    } catch (error) {
+        if (error.code === "P2002") {
+            return res.status(409).json({
+                success: false,
+                message: "Email or PRN already exists",
+            });
+        }
+
+        console.error("Update student error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update student",
+        });
+    }
+};
+
+
+const updateStudentAccountStatus = async (req, res) => {
+    try {
+        const studentId = Number(req.params.id);
+        const { isActive } = req.body;
+
+        if (!Number.isSafeInteger(studentId) || studentId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid student ID",
+            });
+        }
+
+        if (typeof isActive !== "boolean") {
+            return res.status(400).json({
+                success: false,
+                message: "isActive must be a boolean",
+            });
+        }
+
+        const student = await prisma.student.findUnique({
+            where: { id: studentId },
+            select: {
+                id: true,
+                PRN: true,
+                userId: true,
+                user: {
+                    select: {
+                        name: true,
+                        email: true,
+                        isActive: true,
+                    },
+                },
+            },
+        });
+
+        if (!student) {
+            return res.status(404).json({
+                success: false,
+                message: "Student not found",
+            });
+        }
+
+        if (student.user.isActive === isActive) {
+            return res.status(200).json({
+                success: true,
+                message: isActive
+                    ? "Student account is already active"
+                    : "Student account is already deactivated",
+                data: {
+                    studentId: student.id,
+                    PRN: student.PRN,
+                    isActive,
+                },
+            });
+        }
+
+        await prisma.user.update({
+            where: { id: student.userId },
+            data: { isActive },
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: isActive
+                ? "Student account reactivated successfully"
+                : "Student account deactivated successfully",
+            data: {
+                studentId: student.id,
+                PRN: student.PRN,
+                name: student.user.name,
+                email: student.user.email,
+                isActive,
+            },
+        });
+    } catch (error) {
+        console.error("Update student account status error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update student account status",
+        });
+    }
+};
+
 
 
 // GET /api/v1/students/:studentId
@@ -300,6 +977,7 @@ const getMyProfile = async (req, res) => {
                     select: {
                         name: true,
                         email: true,
+                        mustChangePassword: true,
                     },
                 },
                 department: {
@@ -667,5 +1345,8 @@ module.exports = {
     getStudentById,
     getMyProfile,
     getMyDrives,
-    getMyPlacements
+    getMyPlacements,
+    updateStudent,
+    updateStudentAccountStatus,
+    createStudent
 };
