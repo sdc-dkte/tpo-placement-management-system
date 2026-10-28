@@ -4,6 +4,10 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const prisma = require("./prismaClient");
+const {
+    recoverStagedDocumentFiles,
+    withDocumentFileOperation,
+} = require("./utils/documentFiles");
 
 // Routes
 const healthRoutes = require("./routes/health.routes");
@@ -127,10 +131,21 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
+const recoverDocumentFiles = () =>
+    withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)).catch(
+        (error) => {
+            console.error("Document file recovery failed; staged files were preserved:", error);
+        }
+    );
+
 const server = app.listen(PORT, HOST, () => {
     console.log(`🚀 TPO API running at http://localhost:${PORT}`);
     console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+    recoverDocumentFiles();
 });
+
+const documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
+documentRecoveryInterval.unref();
 
 // ====================
 // 7. Graceful Shutdown
@@ -138,6 +153,7 @@ const server = app.listen(PORT, HOST, () => {
 
 const shutdown = async (signal) => {
     console.log(`${signal} received. Shutting down server...`);
+    clearInterval(documentRecoveryInterval);
 
     server.close(async () => {
         try {

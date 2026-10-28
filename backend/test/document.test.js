@@ -1,3 +1,4 @@
+
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -12,11 +13,14 @@ const uploadDirectory = require("node:fs").mkdtempSync(
     path.join(os.tmpdir(), "document-routes-")
 );
 process.env.DOCUMENT_UPLOAD_DIR = uploadDirectory;
+const { recoverStagedDocumentFiles } = require("../src/utils/documentFiles");
 
 const state = {
     createError: null,
     deleteError: null,
     document: null,
+    findUniqueError: null,
+    keepRecordOnDelete: false,
     findManyArgs: null,
     student: { id: 1 },
 };
@@ -32,7 +36,10 @@ const prisma = {
             return state.document;
         },
         findFirst: async () => state.document,
-        findUnique: async () => state.document,
+        findUnique: async () => {
+            if (state.findUniqueError) throw state.findUniqueError;
+            return state.document;
+        },
         findMany: async (args) => {
             state.findManyArgs = args;
             return [];
@@ -40,7 +47,7 @@ const prisma = {
         count: async () => 0,
         delete: async () => {
             if (state.deleteError) throw state.deleteError;
-            state.document = null;
+            if (!state.keepRecordOnDelete) state.document = null;
             return null;
         },
     },
@@ -96,6 +103,8 @@ beforeEach(() => {
     state.createError = null;
     state.deleteError = null;
     state.document = null;
+    state.findUniqueError = null;
+    state.keepRecordOnDelete = false;
     state.findManyArgs = null;
     state.student = { id: 1 };
 });
@@ -247,32 +256,207 @@ test("restores the document file when database deletion fails", async () => {
     assert.equal(response.status, 500);
     assert.equal(state.document.id, 7);
     assert.equal(await fs.readFile(filePath, "utf8"), content);
-    assert.deepEqual(
-        (await currentFiles()).filter((name) => name.startsWith(".pending-delete-")),
-        []
-    );
 });
 
-test("retries cleanup of files queued by a previous failed cleanup", async () => {
-    const pendingPath = path.join(
-        uploadDirectory,
-        ".pending-delete-recovery-test"
-    );
-    await fs.writeFile(pendingPath, "%PDF-pending cleanup");
+test("preserves and later restores the staged file when deletion outcome cannot be checked", async () => {
+    const fileName = "unverified-delete.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    const content = "%PDF-do not discard";
+    await fs.writeFile(filePath, content);
     state.document = {
         id: 7,
         studentId: 1,
-        fileName: "missing.pdf",
-        fileUrl: "/uploads/documents/missing.pdf",
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
     };
+    state.deleteError = new Error("database delete failed");
+    state.findUniqueError = new Error("database unavailable");
 
     const response = await fetch(`${baseUrl}/documents/student/7`, {
         method: "DELETE",
         headers: authorization("STUDENT"),
     });
 
+    assert.equal(response.status, 500);
+    assert.equal(state.document.id, 7);
+    await assert.rejects(fs.access(filePath), { code: "ENOENT" });
+    const stagedFileName = (await currentFiles()).find((name) =>
+        name.startsWith(".staged-delete-7-")
+    );
+    assert.ok(stagedFileName);
+    assert.equal(
+        await fs.readFile(path.join(uploadDirectory, stagedFileName), "utf8"),
+        content
+    );
+
+    state.findUniqueError = null;
+    state.deleteError = null;
+    await recoverStagedDocumentFiles(prisma);
+
+    assert.equal(await fs.readFile(filePath, "utf8"), content);
+    assert.equal(
+        (await currentFiles()).some((name) => name.startsWith(".staged-delete-7-")),
+        false
+    );
+    assert.equal(state.document.id, 7);
+});
+
+test("does not delete a staged file if a successful delete leaves its record", async () => {
+    const fileName = "record-still-exists.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    const content = "%PDF-record still present";
+    await fs.writeFile(filePath, content);
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
+    };
+    state.keepRecordOnDelete = true;
+
+    const response = await fetch(`${baseUrl}/documents/student/7`, {
+        method: "DELETE",
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(state.document.id, 7);
+    assert.equal(await fs.readFile(filePath, "utf8"), content);
+    assert.equal(
+        (await currentFiles()).some((name) => name.startsWith(".staged-delete-7-")),
+        false
+    );
+});
+
+test("recovers a tracked staged file when database deletion and restoration fail", async () => {
+    const fileName = "restore-failure.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    const content = "%PDF-preserve for recovery";
+    await fs.writeFile(filePath, content);
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
+    };
+    state.deleteError = new Error("database unavailable");
+    const originalRename = fs.rename;
+    fs.rename = async (source, destination) => {
+        if (
+            path.basename(source).startsWith(".staged-delete-") &&
+            destination === filePath
+        ) {
+            const error = new Error("restore blocked");
+            error.code = "EACCES";
+            throw error;
+        }
+        return originalRename(source, destination);
+    };
+
+    let response;
+    try {
+        response = await fetch(`${baseUrl}/documents/student/7`, {
+            method: "DELETE",
+            headers: authorization("STUDENT"),
+        });
+    } finally {
+        fs.rename = originalRename;
+    }
+
+    assert.equal(response.status, 500);
+    assert.equal(state.document.id, 7);
+    await assert.rejects(fs.access(filePath), { code: "ENOENT" });
+    const stagedFiles = (await currentFiles()).filter((name) =>
+        name.startsWith(".staged-delete-7-")
+    );
+    assert.equal(stagedFiles.length, 1);
+
+    state.deleteError = null;
+    await recoverStagedDocumentFiles(prisma);
+
+    assert.equal(await fs.readFile(filePath, "utf8"), content);
+    assert.equal(
+        (await currentFiles()).some((name) => name.startsWith(".staged-delete-7-")),
+        false
+    );
+    assert.equal(state.document.id, 7);
+});
+
+test("retains staged files when cleanup fails and retries them later", async () => {
+    const fileName = "cleanup-failure.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    await fs.writeFile(filePath, "%PDF-cleanup retry");
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
+    };
+    const originalUnlink = fs.unlink;
+    let unlinkFailed = false;
+    fs.unlink = async (target) => {
+        if (
+            !unlinkFailed &&
+            path.basename(target).startsWith(".staged-delete-7-")
+        ) {
+            unlinkFailed = true;
+            const error = new Error("cleanup blocked");
+            error.code = "EACCES";
+            throw error;
+        }
+        return originalUnlink(target);
+    };
+
+    let response;
+    try {
+        response = await fetch(`${baseUrl}/documents/student/7`, {
+            method: "DELETE",
+            headers: authorization("STUDENT"),
+        });
+    } finally {
+        fs.unlink = originalUnlink;
+    }
+
     assert.equal(response.status, 200);
-    await assert.rejects(fs.access(pendingPath), { code: "ENOENT" });
+    assert.equal(state.document, null);
+    const stagedFiles = (await currentFiles()).filter((name) =>
+        name.startsWith(".staged-delete-7-")
+    );
+    assert.equal(stagedFiles.length, 1);
+    assert.equal(
+        await fs.readFile(path.join(uploadDirectory, stagedFiles[0]), "utf8"),
+        "%PDF-cleanup retry"
+    );
+
+    await recoverStagedDocumentFiles(prisma);
+
+    assert.equal(
+        (await currentFiles()).some((name) => name.startsWith(".staged-delete-7-")),
+        false
+    );
+    await assert.rejects(fs.access(filePath), { code: "ENOENT" });
+    assert.equal(state.document, null);
+});
+
+test("preserves staged files when database state cannot be checked", async () => {
+    const stagedPath = path.join(
+        uploadDirectory,
+        ".staged-delete-7-12345678-1234-1234-1234-123456789abc"
+    );
+    const content = "%PDF-database state unavailable";
+    await fs.writeFile(stagedPath, content);
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName: "database-check.pdf",
+        fileUrl: "/uploads/documents/database-check.pdf",
+    };
+    state.findUniqueError = new Error("database unavailable");
+
+    await recoverStagedDocumentFiles(prisma);
+
+    assert.equal(await fs.readFile(stagedPath, "utf8"), content);
+    assert.equal(state.document.id, 7);
 });
 
 test("validates document IDs as positive integers", async () => {

@@ -1,3 +1,4 @@
+
 const crypto = require("crypto");
 const fs = require("fs/promises");
 const path = require("path");
@@ -7,8 +8,8 @@ const UPLOAD_DIRECTORY = path.resolve(
         path.join(__dirname, "../../uploads/documents")
 );
 const DOCUMENT_URL_PREFIX = "/uploads/documents/";
-const PENDING_DELETE_PREFIX = ".pending-delete-";
 const STAGED_DELETE_PREFIX = ".staged-delete-";
+let documentFileOperation = Promise.resolve();
 
 const isPathInsideUploadDirectory = (filePath) => {
     const relativePath = path.relative(
@@ -21,9 +22,10 @@ const isPathInsideUploadDirectory = (filePath) => {
 
 const isRealPathInsideUploadDirectory = async (filePath) => {
     const uploadDirectory = await fs.realpath(UPLOAD_DIRECTORY);
+    const actualPath = await fs.realpath(filePath);
     const relativePath = path.relative(
         uploadDirectory,
-        path.resolve(filePath)
+        actualPath
     );
 
     return isRelativePathInsideDirectory(relativePath);
@@ -51,7 +53,7 @@ const resolveDocumentPath = (fileUrl) => {
     return isPathInsideUploadDirectory(resolvedPath) ? resolvedPath : null;
 };
 
-const stageDocumentFileForDeletion = async (filePath) => {
+const stageDocumentFileForDeletion = async (filePath, documentId) => {
     if (!isPathInsideUploadDirectory(filePath)) {
         throw new Error("Refusing to stage a document outside the upload directory.");
     }
@@ -70,7 +72,7 @@ const stageDocumentFileForDeletion = async (filePath) => {
 
     const stagedPath = path.join(
         UPLOAD_DIRECTORY,
-        `${STAGED_DELETE_PREFIX}${crypto.randomUUID()}`
+        `${STAGED_DELETE_PREFIX}${documentId}-${crypto.randomUUID()}`
     );
     await fs.rename(filePath, stagedPath);
 
@@ -92,27 +94,15 @@ const removeStagedDocumentFile = async (stagedFile) => {
     } catch (error) {
         if (error.code === "ENOENT") return true;
 
-        const pendingPath = path.join(
-            UPLOAD_DIRECTORY,
-            `${PENDING_DELETE_PREFIX}${crypto.randomUUID()}`
+        console.error(
+            `Document file cleanup remains tracked at ${stagedFile.stagedPath}:`,
+            error
         );
-        try {
-            await fs.rename(stagedFile.stagedPath, pendingPath);
-            console.error(
-                `Document file cleanup is pending at ${pendingPath}:`,
-                error
-            );
-        } catch (queueError) {
-            console.error(
-                `Document file cleanup could not be queued at ${stagedFile.stagedPath}:`,
-                queueError
-            );
-        }
         return false;
     }
 };
 
-const cleanupPendingDocumentFiles = async () => {
+const recoverStagedDocumentFiles = async (prisma) => {
     let entries;
     try {
         entries = await fs.readdir(UPLOAD_DIRECTORY, {
@@ -123,26 +113,103 @@ const cleanupPendingDocumentFiles = async () => {
         throw error;
     }
 
+    const stagedFilePattern = /^\.staged-delete-(\d+)-[0-9a-f-]{36}$/;
+
     for (const entry of entries) {
-        if (
-            !entry.name.startsWith(PENDING_DELETE_PREFIX) ||
-            (!entry.isFile() && !entry.isSymbolicLink())
-        ) {
+        if (!entry.name.startsWith(STAGED_DELETE_PREFIX)) continue;
+
+        const stagedPath = path.join(UPLOAD_DIRECTORY, entry.name);
+        const match = entry.name.match(stagedFilePattern);
+
+        if (!match || (!entry.isFile() && !entry.isSymbolicLink())) {
+            console.error(
+                `Unrecognized staged document file requires manual recovery: ${stagedPath}`
+            );
             continue;
         }
 
-        const stagedPath = path.join(UPLOAD_DIRECTORY, entry.name);
+        const documentId = Number(match[1]);
+        let document;
+        try {
+            document = await prisma.studentDocument.findUnique({
+                where: { id: documentId },
+            });
+        } catch (error) {
+            console.error(
+                `Could not check document ${documentId}; staged file was preserved at ${stagedPath}:`,
+                error
+            );
+            continue;
+        }
+
+        if (document) {
+            const originalPath = resolveDocumentPath(document.fileUrl);
+            if (!originalPath) {
+                console.error(
+                    `Document ${documentId} has an invalid file path; staged file was preserved at ${stagedPath}.`
+                );
+                continue;
+            }
+
+            try {
+                if (!(await isRealPathInsideUploadDirectory(stagedPath))) {
+                    console.error(
+                        `Staged file for document ${documentId} resolves outside the upload directory; it was preserved at ${stagedPath}.`
+                    );
+                    continue;
+                }
+            } catch (error) {
+                console.error(
+                    `Could not verify staged file for document ${documentId}; it was preserved at ${stagedPath}:`,
+                    error
+                );
+                continue;
+            }
+
+            try {
+                await fs.access(originalPath);
+                console.error(
+                    `Both original and staged files exist for document ${documentId}; staged file was preserved at ${stagedPath}.`
+                );
+                continue;
+            } catch (error) {
+                if (error.code !== "ENOENT") {
+                    console.error(
+                        `Could not inspect document ${documentId}; staged file was preserved at ${stagedPath}:`,
+                        error
+                    );
+                    continue;
+                }
+            }
+
+            try {
+                await fs.rename(stagedPath, originalPath);
+            } catch (error) {
+                console.error(
+                    `Could not restore document ${documentId}; staged file remains at ${stagedPath}:`,
+                    error
+                );
+            }
+            continue;
+        }
+
         try {
             await fs.unlink(stagedPath);
         } catch (error) {
             if (error.code !== "ENOENT") {
                 console.error(
-                    `Document file cleanup remains pending at ${stagedPath}:`,
+                    `Document ${documentId} was deleted but staged-file cleanup remains pending at ${stagedPath}:`,
                     error
                 );
             }
         }
     }
+};
+
+const withDocumentFileOperation = (operation) => {
+    const currentOperation = documentFileOperation.then(operation, operation);
+    documentFileOperation = currentOperation.catch(() => {});
+    return currentOperation;
 };
 
 const removeUploadedFile = async (file) => {
@@ -171,5 +238,6 @@ module.exports = {
     stageDocumentFileForDeletion,
     restoreStagedDocumentFile,
     removeStagedDocumentFile,
-    cleanupPendingDocumentFiles,
+    recoverStagedDocumentFiles,
+    withDocumentFileOperation,
 };

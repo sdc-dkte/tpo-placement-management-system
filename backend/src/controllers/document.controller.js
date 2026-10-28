@@ -1,13 +1,15 @@
+
 const prisma = require("../prismaClient");
 const fs = require("fs/promises");
 const {
-    cleanupPendingDocumentFiles,
     isRealPathInsideUploadDirectory,
     removeStagedDocumentFile,
     removeUploadedFile,
+    recoverStagedDocumentFiles,
     restoreStagedDocumentFile,
     resolveDocumentPath,
     stageDocumentFileForDeletion,
+    withDocumentFileOperation,
 } = require("../utils/documentFiles");
 
 const SUPPORTED_DOCUMENT_TYPES = new Set([
@@ -137,94 +139,158 @@ const uploadDocument = async (req, res) => {
 };
 
 const deleteDocument = async (req, res) => {
-    try {
-        const student = await prisma.student.findUnique({
-            where: {
-                userId: req.user.id,
-            },
-        });
-
-        if (!student) {
-            return res.status(404).json({
-                success: false,
-                message: "Student profile not found.",
-            });
-        }
-
-        const documentId = parseDocumentId(req.params.id);
-
-        if (!documentId) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid document ID.",
-            });
-        }
-
-        const document = await prisma.studentDocument.findFirst({
-            where: {
-                id: documentId,
-                studentId: student.id,
-            },
-        });
-
-        if (!document) {
-            return res.status(404).json({
-                success: false,
-                message: "Document not found.",
-            });
-        }
-
-        const filePath = getDocumentFilePath(document);
-
-        if (!filePath) {
-            return res.status(500).json({
-                success: false,
-                message: "Document file path is invalid on server.",
-            });
-        }
-
-        await cleanupPendingDocumentFiles();
-        const stagedFile = await stageDocumentFileForDeletion(filePath);
-
+    return withDocumentFileOperation(async () => {
         try {
-            await prisma.studentDocument.delete({
+            const student = await prisma.student.findUnique({
                 where: {
-                    id: document.id,
+                    userId: req.user.id,
                 },
             });
-        } catch (error) {
+
+            if (!student) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Student profile not found.",
+                });
+            }
+
+            const documentId = parseDocumentId(req.params.id);
+
+            if (!documentId) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid document ID.",
+                });
+            }
+
+            const document = await prisma.studentDocument.findFirst({
+                where: {
+                    id: documentId,
+                    studentId: student.id,
+                },
+            });
+
+            if (!document) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Document not found.",
+                });
+            }
+
+            const filePath = getDocumentFilePath(document);
+
+            if (!filePath) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Document file path is invalid on server.",
+                });
+            }
+
+            await recoverStagedDocumentFiles(prisma);
+            const stagedFile = await stageDocumentFileForDeletion(
+                filePath,
+                document.id
+            );
+
             try {
-                await restoreStagedDocumentFile(stagedFile);
-            } catch (restoreError) {
+                await prisma.studentDocument.delete({
+                    where: {
+                        id: document.id,
+                    },
+                });
+            } catch (error) {
+                let currentDocument;
+                try {
+                    currentDocument = await prisma.studentDocument.findUnique({
+                        where: {
+                            id: document.id,
+                        },
+                    });
+                } catch (verificationError) {
+                    console.error(
+                        `Could not verify document ${document.id} after deletion failed. Staged file was preserved at ${stagedFile?.stagedPath}:`,
+                        verificationError
+                    );
+                    return res.status(500).json({
+                        success: false,
+                        message:
+                            "Document deletion could not be verified. File recovery is pending.",
+                    });
+                }
+
+                if (!currentDocument) {
+                    await removeStagedDocumentFile(stagedFile);
+                    throw error;
+                }
+
+                try {
+                    await restoreStagedDocumentFile(stagedFile);
+                } catch (restoreError) {
+                    console.error(
+                        `Failed to restore document file after database deletion failed. Recovery file: ${stagedFile?.stagedPath}`,
+                        restoreError
+                    );
+                    return res.status(500).json({
+                        success: false,
+                        message:
+                            "Failed to delete document. File restoration is pending recovery.",
+                    });
+                }
+                throw error;
+            }
+
+            let remainingDocument;
+            try {
+                remainingDocument = await prisma.studentDocument.findUnique({
+                    where: {
+                        id: document.id,
+                    },
+                });
+            } catch (verificationError) {
                 console.error(
-                    `Failed to restore document file after database deletion failed. Recovery file: ${stagedFile?.stagedPath}`,
-                    restoreError
+                    `Could not verify document ${document.id} after deletion. Staged file was preserved at ${stagedFile?.stagedPath}:`,
+                    verificationError
                 );
                 return res.status(500).json({
                     success: false,
                     message:
-                        "Failed to delete document. File restoration is pending recovery.",
+                        "Document deletion could not be verified. File cleanup is pending recovery.",
                 });
             }
-            throw error;
+
+            if (remainingDocument) {
+                try {
+                    await restoreStagedDocumentFile(stagedFile);
+                } catch (restoreError) {
+                    console.error(
+                        `Document ${document.id} still exists but its staged file could not be restored. Recovery file: ${stagedFile?.stagedPath}`,
+                        restoreError
+                    );
+                }
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "Document record still exists. File was preserved for recovery.",
+                });
+            }
+
+            const fileCleanupComplete = await removeStagedDocumentFile(stagedFile);
+
+            return res.status(200).json({
+                success: true,
+                message: fileCleanupComplete
+                    ? "Document deleted successfully."
+                    : "Document deleted successfully. File cleanup is pending and will be retried.",
+            });
+        } catch (error) {
+            console.error("Error deleting document:", error);
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to delete document.",
+            });
         }
-
-        const fileCleanupComplete = await removeStagedDocumentFile(stagedFile);
-
-        return res.status(200).json({
-            success: true,
-            message: fileCleanupComplete
-                ? "Document deleted successfully."
-                : "Document deleted successfully. File cleanup is pending and will be retried.",
-        });
-    } catch (error) {
-        console.error("Error deleting document:", error);
-
-        return res.status(500).json({
-            success: false,
-            message: "Failed to delete document.",
-        });
-    }
+    });
 };
 
 const downloadDocument = async (req, res) => {
