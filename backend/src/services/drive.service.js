@@ -4,132 +4,316 @@ const VALID_DRIVE_STATUSES = ["UPCOMING", "ONGOING", "COMPLETED", "CANCELLED"];
 
 const ALLOWED_STATUS_TRANSITIONS = {
     UPCOMING: ["ONGOING", "CANCELLED"],
-    ONGOING: ["COMPLETED", "CANCELLED", "UPCOMING"],
+    ONGOING: ["COMPLETED", "CANCELLED"],
     COMPLETED: [], // Terminal state
     CANCELLED: [], // Terminal state
 };
 
+// ---------------------------------------------------------------------------
+// Internal Helpers
+// ---------------------------------------------------------------------------
+
 /**
- * Creates a new placement drive along with its eligibility criteria atomically.
+ * Throws a structured error with a statusCode property.
+ */
+const fail = (message, statusCode) => {
+    const err = new Error(message);
+    err.statusCode = statusCode;
+    throw err;
+};
+
+/**
+ * Parses and validates a numeric ID from an untrusted value.
+ * Throws 400 if the value is not a positive integer.
+ */
+const parseId = (value, fieldName) => {
+    const n = parseInt(value, 10);
+    if (!Number.isInteger(n) || n <= 0) {
+        fail(`"${fieldName}" must be a positive integer. Received: ${value}`, 400);
+    }
+    return n;
+};
+
+/**
+ * Parses and validates a percentage value (0–100).
+ */
+const parsePercentage = (value, fieldName) => {
+    const n = Number(value);
+    if (Number.isNaN(n) || n < 0 || n > 100) {
+        fail(`"${fieldName}" must be a number between 0 and 100. Received: ${value}`, 400);
+    }
+    return n;
+};
+
+/**
+ * Parses and validates a CGPA value (0–10).
+ */
+const parseCGPA = (value) => {
+    const n = Number(value);
+    if (Number.isNaN(n) || n < 0 || n > 10) {
+        fail(`"minimumCGPA" must be a number between 0 and 10. Received: ${value}`, 400);
+    }
+    return n;
+};
+
+/**
+ * Parses and validates a non-negative integer (for backlogs, grad year, etc.).
+ */
+const parseNonNegativeInt = (value, fieldName) => {
+    const n = parseInt(value, 10);
+    if (!Number.isInteger(n) || n < 0) {
+        fail(`"${fieldName}" must be a non-negative integer. Received: ${value}`, 400);
+    }
+    return n;
+};
+
+/**
+ * Validates and parses an ISO date string. Returns a Date or null.
+ */
+const parseDate = (value, fieldName) => {
+    if (value === null || value === undefined || value === "") return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+        fail(`"${fieldName}" must be a valid ISO date string. Received: ${value}`, 400);
+    }
+    return d;
+};
+
+/**
+ * Validates an array of positive integer IDs.
+ */
+const parseIdArray = (arr, fieldName) => {
+    if (!Array.isArray(arr)) {
+        fail(`"${fieldName}" must be an array.`, 400);
+    }
+    const result = arr.map((v, i) => {
+        const n = parseInt(v, 10);
+        if (!Number.isInteger(n) || n <= 0) {
+            fail(`"${fieldName}[${i}]" must be a positive integer. Received: ${v}`, 400);
+        }
+        return n;
+    });
+    return result;
+};
+
+/**
+ * Validates an array of graduation years (integers between 2000 and 2100).
+ */
+const parseYearArray = (arr) => {
+    if (!Array.isArray(arr)) {
+        fail('"graduationYears" must be an array.', 400);
+    }
+    return arr.map((v, i) => {
+        const n = parseInt(v, 10);
+        if (!Number.isInteger(n) || n < 2000 || n > 2100) {
+            fail(
+                `"graduationYears[${i}]" must be a valid year between 2000 and 2100. Received: ${v}`,
+                400
+            );
+        }
+        return n;
+    });
+};
+
+/**
+ * Validates and normalises the eligibility sub-object from a request.
+ * Returns a cleaned object or null if no eligibility block was provided.
+ */
+const validateAndNormaliseEligibility = (eligibility) => {
+    if (!eligibility || typeof eligibility !== "object") return null;
+
+    const out = {
+        minimumCGPA: 0,
+        minimumTenth: 0,
+        minimumTwelfth: null,
+        minimumDiplomaPercentage: null,
+        maximumBacklogs: 0,
+        allowPreviousPlacement: false,
+        departmentIds: [],
+        graduationYears: [],
+    };
+
+    if (eligibility.minimumCGPA !== undefined && eligibility.minimumCGPA !== null) {
+        out.minimumCGPA = parseCGPA(eligibility.minimumCGPA);
+    }
+    if (eligibility.minimumTenth !== undefined && eligibility.minimumTenth !== null) {
+        out.minimumTenth = parsePercentage(eligibility.minimumTenth, "minimumTenth");
+    }
+    if (eligibility.minimumTwelfth !== undefined && eligibility.minimumTwelfth !== null) {
+        out.minimumTwelfth = parsePercentage(eligibility.minimumTwelfth, "minimumTwelfth");
+    }
+    if (eligibility.minimumDiplomaPercentage !== undefined && eligibility.minimumDiplomaPercentage !== null) {
+        out.minimumDiplomaPercentage = parsePercentage(
+            eligibility.minimumDiplomaPercentage,
+            "minimumDiplomaPercentage"
+        );
+    }
+    if (eligibility.maximumBacklogs !== undefined && eligibility.maximumBacklogs !== null) {
+        out.maximumBacklogs = parseNonNegativeInt(eligibility.maximumBacklogs, "maximumBacklogs");
+    }
+    if (eligibility.allowPreviousPlacement !== undefined) {
+        if (typeof eligibility.allowPreviousPlacement !== "boolean") {
+            fail('"allowPreviousPlacement" must be a boolean.', 400);
+        }
+        out.allowPreviousPlacement = eligibility.allowPreviousPlacement;
+    }
+    if (eligibility.departmentIds !== undefined) {
+        out.departmentIds = parseIdArray(eligibility.departmentIds, "departmentIds");
+    }
+    if (eligibility.graduationYears !== undefined) {
+        out.graduationYears = parseYearArray(eligibility.graduationYears);
+    }
+
+    return out;
+};
+
+/**
+ * Verifies that all given department IDs exist in the database.
+ * Throws 404 with the list of missing IDs if any are not found.
+ */
+const assertDepartmentsExist = async (departmentIds) => {
+    if (!departmentIds || departmentIds.length === 0) return;
+
+    const found = await prisma.department.findMany({
+        where: { id: { in: departmentIds } },
+        select: { id: true },
+    });
+
+    const foundSet = new Set(found.map((d) => d.id));
+    const missing = departmentIds.filter((id) => !foundSet.has(id));
+
+    if (missing.length > 0) {
+        fail(`Department IDs not found: ${missing.join(", ")}.`, 404);
+    }
+};
+
+/**
+ * Shared include block used when returning a full drive record.
+ */
+const DRIVE_FULL_INCLUDE = {
+    company: { select: { id: true, name: true, website: true, description: true } },
+    jobRole: { select: { id: true, title: true, description: true, domain: true } },
+    eligibilityCriteria: true,
+    eligibleBranches: {
+        include: { department: { select: { id: true, name: true, code: true } } },
+    },
+    eligibleYears: { select: { graduationYear: true } },
+};
+
+/**
+ * Formats a raw Prisma drive record into the standard API response shape.
+ */
+const formatDrive = (drive) => ({
+    id: drive.id,
+    title: drive.title,
+    packageLPA: drive.packageLPA,
+    driveDate: drive.driveDate,
+    applicationDeadline: drive.applicationDeadline,
+    status: drive.status,
+    venue: drive.venue,
+    hiringProcess: drive.hiringProcess,
+    createdAt: drive.createdAt,
+    updatedAt: drive.updatedAt,
+    company: drive.company,
+    jobRole: drive.jobRole,
+    eligibility: {
+        minimumCGPA: drive.eligibilityCriteria?.minimumCGPA ?? 0,
+        minimumTenth: drive.eligibilityCriteria?.minimumTenth ?? 0,
+        minimumTwelfth: drive.eligibilityCriteria?.minimumTwelfth ?? null,
+        minimumDiplomaPercentage: drive.eligibilityCriteria?.minimumDiplomaPercentage ?? null,
+        maximumBacklogs: drive.eligibilityCriteria?.maximumBacklogs ?? 0,
+        allowPreviousPlacement: drive.eligibilityCriteria?.allowPreviousPlacement ?? false,
+        departments: (drive.eligibleBranches || []).map((b) => ({
+            id: b.department.id,
+            name: b.department.name,
+            code: b.department.code,
+        })),
+        departmentIds: (drive.eligibleBranches || []).map((b) => b.department.id),
+        graduationYears: (drive.eligibleYears || []).map((y) => y.graduationYear),
+    },
+});
+
+// ---------------------------------------------------------------------------
+// Service Functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a new placement drive atomically with its eligibility criteria.
  */
 const createPlacementDrive = async (payload) => {
     const {
-        companyId,
-        jobRoleId,
+        companyId: rawCompanyId,
+        jobRoleId: rawJobRoleId,
         title,
         packageLPA,
-        driveDate,
-        applicationDeadline,
+        driveDate: rawDriveDate,
+        applicationDeadline: rawDeadline,
         status = "UPCOMING",
         venue,
         hiringProcess,
-        eligibility,
+        eligibility: rawEligibility,
     } = payload;
 
-    // 1. Verify Company exists
-    const company = await prisma.company.findUnique({
-        where: { id: Number(companyId) },
-    });
-    if (!company) {
-        const error = new Error(`Company with ID ${companyId} was not found.`);
-        error.statusCode = 404;
-        throw error;
-    }
+    // --- Required field presence ---
+    if (!rawCompanyId) fail('"companyId" is required.', 400);
+    if (!rawJobRoleId) fail('"jobRoleId" is required.', 400);
+    if (!title || !String(title).trim()) fail('"title" is required and cannot be blank.', 400);
+    if (packageLPA === undefined || packageLPA === null) fail('"packageLPA" is required.', 400);
 
-    // 2. Verify Job Role exists
-    const jobRole = await prisma.jobRole.findUnique({
-        where: { id: Number(jobRoleId) },
-    });
-    if (!jobRole) {
-        const error = new Error(`Job role with ID ${jobRoleId} was not found.`);
-        error.statusCode = 404;
-        throw error;
-    }
+    // --- ID validation ---
+    const companyId = parseId(rawCompanyId, "companyId");
+    const jobRoleId = parseId(rawJobRoleId, "jobRoleId");
 
-    // 3. Business rule: Job role must belong to the specified Company
-    if (jobRole.companyId !== Number(companyId)) {
-        const error = new Error(
-            `Job role "${jobRole.title}" does not belong to company "${company.name}".`
-        );
-        error.statusCode = 422;
-        throw error;
-    }
-
-    // 4. Validate Status
-    const driveStatus = String(status).toUpperCase();
-    if (!VALID_DRIVE_STATUSES.includes(driveStatus)) {
-        const error = new Error(
-            `Invalid status "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`
-        );
-        error.statusCode = 400;
-        throw error;
-    }
-
-    // 5. Validate dates
-    let parsedDriveDate = null;
-    let parsedDeadline = null;
-
-    if (driveDate) {
-        parsedDriveDate = new Date(driveDate);
-        if (Number.isNaN(parsedDriveDate.getTime())) {
-            const error = new Error("Invalid driveDate format. Must be an ISO date string.");
-            error.statusCode = 400;
-            throw error;
-        }
-    }
-
-    if (applicationDeadline) {
-        parsedDeadline = new Date(applicationDeadline);
-        if (Number.isNaN(parsedDeadline.getTime())) {
-            const error = new Error(
-                "Invalid applicationDeadline format. Must be an ISO date string."
-            );
-            error.statusCode = 400;
-            throw error;
-        }
-    }
-
-    if (parsedDriveDate && parsedDeadline && parsedDeadline > parsedDriveDate) {
-        const error = new Error(
-            "Application deadline cannot be after the scheduled drive date."
-        );
-        error.statusCode = 422;
-        throw error;
-    }
-
-    // 6. Validate Package
+    // --- Package ---
     const parsedPackage = Number(packageLPA);
     if (Number.isNaN(parsedPackage) || parsedPackage <= 0) {
-        const error = new Error("packageLPA must be a positive number.");
-        error.statusCode = 400;
-        throw error;
+        fail('"packageLPA" must be a positive number.', 400);
     }
 
-    // 7. Validate departments if specified
-    if (eligibility && Array.isArray(eligibility.departmentIds) && eligibility.departmentIds.length > 0) {
-        const existingDepartments = await prisma.department.findMany({
-            where: { id: { in: eligibility.departmentIds.map((id) => Number(id)) } },
-            select: { id: true },
-        });
-
-        const foundIds = new Set(existingDepartments.map((d) => d.id));
-        const invalidIds = eligibility.departmentIds.filter((id) => !foundIds.has(Number(id)));
-
-        if (invalidIds.length > 0) {
-            const error = new Error(
-                `Department IDs not found: ${invalidIds.join(", ")}.`
-            );
-            error.statusCode = 404;
-            throw error;
-        }
+    // --- Status ---
+    const driveStatus = String(status).toUpperCase();
+    if (!VALID_DRIVE_STATUSES.includes(driveStatus)) {
+        fail(
+            `Invalid status "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`,
+            400
+        );
     }
 
-    // 8. Execute transactional creation
+    // --- Dates ---
+    const parsedDriveDate = parseDate(rawDriveDate, "driveDate");
+    const parsedDeadline = parseDate(rawDeadline, "applicationDeadline");
+    if (parsedDriveDate && parsedDeadline && parsedDeadline > parsedDriveDate) {
+        fail("Application deadline cannot be after the scheduled drive date.", 422);
+    }
+
+    // --- Eligibility block ---
+    const eligibility = validateAndNormaliseEligibility(rawEligibility);
+
+    // --- DB lookups ---
+    const [company, jobRole] = await Promise.all([
+        prisma.company.findUnique({ where: { id: companyId } }),
+        prisma.jobRole.findUnique({ where: { id: jobRoleId } }),
+    ]);
+
+    if (!company) fail(`Company with ID ${companyId} was not found.`, 404);
+    if (!jobRole) fail(`Job role with ID ${jobRoleId} was not found.`, 404);
+    if (jobRole.companyId !== companyId) {
+        fail(
+            `Job role "${jobRole.title}" does not belong to company "${company.name}".`,
+            422
+        );
+    }
+
+    if (eligibility) {
+        await assertDepartmentsExist(eligibility.departmentIds);
+    }
+
+    // --- Atomic transaction ---
     return await prisma.$transaction(async (tx) => {
         const createdDrive = await tx.placementDrive.create({
             data: {
-                companyId: Number(companyId),
-                jobRoleId: Number(jobRoleId),
+                companyId,
+                jobRoleId,
                 title: title.trim(),
                 packageLPA: parsedPackage,
                 driveDate: parsedDriveDate,
@@ -140,72 +324,56 @@ const createPlacementDrive = async (payload) => {
             },
         });
 
-        // Create Eligibility Criteria & Junctions if provided
         if (eligibility) {
             await tx.eligibilityCriteria.create({
                 data: {
                     driveId: createdDrive.id,
-                    minimumCGPA: eligibility.minimumCGPA !== undefined ? Number(eligibility.minimumCGPA) : 0,
-                    minimumTenth: eligibility.minimumTenth !== undefined ? Number(eligibility.minimumTenth) : 0,
-                    minimumTwelfth: eligibility.minimumTwelfth !== undefined && eligibility.minimumTwelfth !== null
-                        ? Number(eligibility.minimumTwelfth)
-                        : null,
-                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage !== undefined && eligibility.minimumDiplomaPercentage !== null
-                        ? Number(eligibility.minimumDiplomaPercentage)
-                        : null,
-                    maximumBacklogs: eligibility.maximumBacklogs !== undefined ? Number(eligibility.maximumBacklogs) : 0,
-                    allowPreviousPlacement: Boolean(eligibility.allowPreviousPlacement),
+                    minimumCGPA: eligibility.minimumCGPA,
+                    minimumTenth: eligibility.minimumTenth,
+                    minimumTwelfth: eligibility.minimumTwelfth,
+                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage,
+                    maximumBacklogs: eligibility.maximumBacklogs,
+                    allowPreviousPlacement: eligibility.allowPreviousPlacement,
                 },
             });
 
-            if (Array.isArray(eligibility.departmentIds) && eligibility.departmentIds.length > 0) {
-                const branchData = eligibility.departmentIds.map((deptId) => ({
-                    driveId: createdDrive.id,
-                    departmentId: Number(deptId),
-                }));
+            if (eligibility.departmentIds.length > 0) {
                 await tx.driveEligibleBranch.createMany({
-                    data: branchData,
+                    data: eligibility.departmentIds.map((deptId) => ({
+                        driveId: createdDrive.id,
+                        departmentId: deptId,
+                    })),
                     skipDuplicates: true,
                 });
             }
 
-            if (Array.isArray(eligibility.graduationYears) && eligibility.graduationYears.length > 0) {
-                const yearData = eligibility.graduationYears.map((yr) => ({
-                    driveId: createdDrive.id,
-                    graduationYear: Number(yr),
-                }));
+            if (eligibility.graduationYears.length > 0) {
                 await tx.driveEligibleYear.createMany({
-                    data: yearData,
+                    data: eligibility.graduationYears.map((yr) => ({
+                        driveId: createdDrive.id,
+                        graduationYear: yr,
+                    })),
                     skipDuplicates: true,
                 });
             }
         }
 
-        // Return newly created drive with its relations
-        return await tx.placementDrive.findUnique({
+        const full = await tx.placementDrive.findUnique({
             where: { id: createdDrive.id },
-            include: {
-                company: { select: { id: true, name: true, website: true, description: true } },
-                jobRole: { select: { id: true, title: true, description: true, domain: true } },
-                eligibilityCriteria: true,
-                eligibleBranches: {
-                    include: { department: { select: { id: true, name: true, code: true } } },
-                },
-                eligibleYears: {
-                    select: { graduationYear: true },
-                },
-            },
+            include: DRIVE_FULL_INCLUDE,
         });
+
+        return formatDrive(full);
     });
 };
 
 /**
- * Lists all drives with comprehensive filtering, search, and pagination.
+ * Lists all drives with filtering, search, and pagination.
  */
 const getAllPlacementDrives = async (query = {}) => {
     const {
-        page = 1,
-        limit = 20,
+        page,
+        limit,
         companyId,
         jobRoleId,
         status,
@@ -222,47 +390,46 @@ const getAllPlacementDrives = async (query = {}) => {
 
     const where = {};
 
-    if (companyId) {
-        where.companyId = Number(companyId);
+    if (companyId !== undefined) {
+        where.companyId = parseId(companyId, "companyId");
     }
-
-    if (jobRoleId) {
-        where.jobRoleId = Number(jobRoleId);
+    if (jobRoleId !== undefined) {
+        where.jobRoleId = parseId(jobRoleId, "jobRoleId");
     }
-
-    if (status) {
+    if (status !== undefined) {
         const upperStatus = String(status).toUpperCase();
-        if (VALID_DRIVE_STATUSES.includes(upperStatus)) {
-            where.status = upperStatus;
+        if (!VALID_DRIVE_STATUSES.includes(upperStatus)) {
+            fail(
+                `Invalid status filter "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`,
+                400
+            );
         }
+        where.status = upperStatus;
+    }
+    if (departmentId !== undefined) {
+        where.eligibleBranches = { some: { departmentId: parseId(departmentId, "departmentId") } };
+    }
+    if (graduationYear !== undefined) {
+        const yr = parseInt(graduationYear, 10);
+        if (!Number.isInteger(yr) || yr < 2000 || yr > 2100) {
+            fail('"graduationYear" must be a valid year between 2000 and 2100.', 400);
+        }
+        where.eligibleYears = { some: { graduationYear: yr } };
     }
 
-    if (departmentId) {
-        where.eligibleBranches = {
-            some: { departmentId: Number(departmentId) },
-        };
-    }
-
-    if (graduationYear) {
-        where.eligibleYears = {
-            some: { graduationYear: Number(graduationYear) },
-        };
-    }
-
-    if (search && search.trim() !== "") {
-        const searchTerm = search.trim();
+    if (search && String(search).trim()) {
+        const term = String(search).trim();
         where.OR = [
-            { title: { contains: searchTerm, mode: "insensitive" } },
-            { company: { name: { contains: searchTerm, mode: "insensitive" } } },
-            { jobRole: { title: { contains: searchTerm, mode: "insensitive" } } },
-            { venue: { contains: searchTerm, mode: "insensitive" } },
+            { title: { contains: term, mode: "insensitive" } },
+            { company: { name: { contains: term, mode: "insensitive" } } },
+            { jobRole: { title: { contains: term, mode: "insensitive" } } },
+            { venue: { contains: term, mode: "insensitive" } },
         ];
     }
 
-    // Allowed sort fields to avoid SQL injection
-    const allowedSortFields = ["createdAt", "driveDate", "applicationDeadline", "packageLPA", "title", "status"];
-    const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
-    const sortDirection = String(sortOrder).toLowerCase() === "asc" ? "asc" : "desc";
+    const ALLOWED_SORT = ["createdAt", "driveDate", "applicationDeadline", "packageLPA", "title", "status"];
+    const sortField = ALLOWED_SORT.includes(sortBy) ? sortBy : "createdAt";
+    const sortDir = String(sortOrder).toLowerCase() === "asc" ? "asc" : "desc";
 
     const [total, drives] = await Promise.all([
         prisma.placementDrive.count({ where }),
@@ -270,63 +437,27 @@ const getAllPlacementDrives = async (query = {}) => {
             where,
             skip,
             take: limitNum,
-            orderBy: { [sortField]: sortDirection },
+            orderBy: { [sortField]: sortDir },
             include: {
-                company: { select: { id: true, name: true, website: true, description: true } },
-                jobRole: { select: { id: true, title: true, domain: true } },
-                eligibilityCriteria: true,
-                eligibleBranches: {
-                    include: { department: { select: { id: true, name: true, code: true } } },
-                },
-                eligibleYears: { select: { graduationYear: true } },
-                _count: {
-                    select: {
-                        participations: true,
-                        selections: true,
-                    },
-                },
+                ...DRIVE_FULL_INCLUDE,
+                _count: { select: { participations: true, selections: true } },
             },
         }),
     ]);
 
-    const totalPages = Math.ceil(total / limitNum) || 1;
-
-    // Transform drives for consistent, intuitive client output
-    const formattedData = drives.map((d) => ({
-        id: d.id,
-        companyId: d.companyId,
-        companyName: d.company?.name || "",
-        company: d.company,
-        jobRoleId: d.jobRoleId,
-        jobRoleTitle: d.jobRole?.title || "",
-        jobRole: d.jobRole,
-        title: d.title,
-        packageLPA: d.packageLPA,
-        driveDate: d.driveDate,
-        applicationDeadline: d.applicationDeadline,
-        status: d.status,
-        venue: d.venue,
-        hiringProcess: d.hiringProcess,
-        createdAt: d.createdAt,
-        updatedAt: d.updatedAt,
-        eligibilityCriteria: d.eligibilityCriteria,
-        eligibleDepartments: d.eligibleBranches.map((b) => ({
-            id: b.department.id,
-            name: b.department.name,
-            code: b.department.code,
-        })),
-        eligibleGraduationYears: d.eligibleYears.map((y) => y.graduationYear),
+    const data = drives.map((d) => ({
+        ...formatDrive(d),
         participationsCount: d._count.participations,
         selectionsCount: d._count.selections,
     }));
 
     return {
-        data: formattedData,
+        data,
         pagination: {
             page: pageNum,
             limit: limitNum,
             total,
-            totalPages,
+            totalPages: Math.ceil(total / limitNum) || 1,
         },
     };
 };
@@ -334,59 +465,21 @@ const getAllPlacementDrives = async (query = {}) => {
 /**
  * Retrieves a single drive by ID with full details.
  */
-const getPlacementDriveById = async (driveId) => {
+const getPlacementDriveById = async (rawDriveId) => {
+    const driveId = parseId(rawDriveId, "driveId");
+
     const drive = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
+        where: { id: driveId },
         include: {
-            company: { select: { id: true, name: true, website: true, description: true } },
-            jobRole: { select: { id: true, title: true, description: true, domain: true } },
-            eligibilityCriteria: true,
-            eligibleBranches: {
-                include: { department: { select: { id: true, name: true, code: true } } },
-            },
-            eligibleYears: { select: { graduationYear: true } },
-            _count: {
-                select: {
-                    participations: true,
-                    selections: true,
-                    emailCampaigns: true,
-                },
-            },
+            ...DRIVE_FULL_INCLUDE,
+            _count: { select: { participations: true, selections: true, emailCampaigns: true } },
         },
     });
 
-    if (!drive) {
-        return null;
-    }
+    if (!drive) return null;
 
     return {
-        id: drive.id,
-        title: drive.title,
-        packageLPA: drive.packageLPA,
-        driveDate: drive.driveDate,
-        applicationDeadline: drive.applicationDeadline,
-        status: drive.status,
-        venue: drive.venue,
-        hiringProcess: drive.hiringProcess,
-        createdAt: drive.createdAt,
-        updatedAt: drive.updatedAt,
-        company: drive.company,
-        jobRole: drive.jobRole,
-        eligibility: {
-            minimumCGPA: drive.eligibilityCriteria?.minimumCGPA ?? 0,
-            minimumTenth: drive.eligibilityCriteria?.minimumTenth ?? 0,
-            minimumTwelfth: drive.eligibilityCriteria?.minimumTwelfth ?? null,
-            minimumDiplomaPercentage: drive.eligibilityCriteria?.minimumDiplomaPercentage ?? null,
-            maximumBacklogs: drive.eligibilityCriteria?.maximumBacklogs ?? 0,
-            allowPreviousPlacement: drive.eligibilityCriteria?.allowPreviousPlacement ?? false,
-            departments: drive.eligibleBranches.map((b) => ({
-                id: b.department.id,
-                name: b.department.name,
-                code: b.department.code,
-            })),
-            departmentIds: drive.eligibleBranches.map((b) => b.department.id),
-            graduationYears: drive.eligibleYears.map((y) => y.graduationYear),
-        },
+        ...formatDrive(drive),
         counts: {
             participations: drive._count.participations,
             selections: drive._count.selections,
@@ -396,51 +489,40 @@ const getPlacementDriveById = async (driveId) => {
 };
 
 /**
- * Updates a placement drive and its eligibility settings.
+ * Updates a placement drive (partial update). Eligibility block is optional.
  */
-const updatePlacementDrive = async (driveId, payload) => {
+const updatePlacementDrive = async (rawDriveId, payload) => {
+    const driveId = parseId(rawDriveId, "driveId");
+
     const existing = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
+        where: { id: driveId },
         include: { eligibilityCriteria: true },
     });
-
-    if (!existing) {
-        const error = new Error(`Placement drive with ID ${driveId} was not found.`);
-        error.statusCode = 404;
-        throw error;
-    }
+    if (!existing) fail(`Placement drive with ID ${driveId} was not found.`, 404);
 
     const {
         title,
         packageLPA,
-        driveDate,
-        applicationDeadline,
+        driveDate: rawDriveDate,
+        applicationDeadline: rawDeadline,
         status,
         venue,
         hiringProcess,
-        companyId,
-        jobRoleId,
-        eligibility,
+        companyId: rawCompanyId,
+        jobRoleId: rawJobRoleId,
+        eligibility: rawEligibility,
     } = payload;
 
     const dataToUpdate = {};
 
     if (title !== undefined) {
-        if (!String(title).trim()) {
-            const error = new Error("Drive title cannot be empty.");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (!String(title).trim()) fail('"title" cannot be blank.', 400);
         dataToUpdate.title = String(title).trim();
     }
 
     if (packageLPA !== undefined) {
         const pkg = Number(packageLPA);
-        if (Number.isNaN(pkg) || pkg <= 0) {
-            const error = new Error("packageLPA must be a positive number.");
-            error.statusCode = 400;
-            throw error;
-        }
+        if (Number.isNaN(pkg) || pkg <= 0) fail('"packageLPA" must be a positive number.', 400);
         dataToUpdate.packageLPA = pkg;
     }
 
@@ -452,317 +534,249 @@ const updatePlacementDrive = async (driveId, payload) => {
         dataToUpdate.hiringProcess = hiringProcess ? String(hiringProcess).trim() : null;
     }
 
-    if (driveDate !== undefined) {
-        if (driveDate === null) {
-            dataToUpdate.driveDate = null;
-        } else {
-            const parsed = new Date(driveDate);
-            if (Number.isNaN(parsed.getTime())) {
-                const error = new Error("Invalid driveDate format.");
-                error.statusCode = 400;
-                throw error;
-            }
-            dataToUpdate.driveDate = parsed;
-        }
+    if (rawDriveDate !== undefined) {
+        dataToUpdate.driveDate = parseDate(rawDriveDate, "driveDate");
     }
 
-    if (applicationDeadline !== undefined) {
-        if (applicationDeadline === null) {
-            dataToUpdate.applicationDeadline = null;
-        } else {
-            const parsed = new Date(applicationDeadline);
-            if (Number.isNaN(parsed.getTime())) {
-                const error = new Error("Invalid applicationDeadline format.");
-                error.statusCode = 400;
-                throw error;
-            }
-            dataToUpdate.applicationDeadline = parsed;
-        }
+    if (rawDeadline !== undefined) {
+        dataToUpdate.applicationDeadline = parseDate(rawDeadline, "applicationDeadline");
     }
 
-    // Validate deadline vs driveDate
-    const finalDriveDate = dataToUpdate.driveDate !== undefined ? dataToUpdate.driveDate : existing.driveDate;
-    const finalDeadline = dataToUpdate.applicationDeadline !== undefined ? dataToUpdate.applicationDeadline : existing.applicationDeadline;
+    // Cross-field date check using the merged final values
+    const finalDriveDate =
+        "driveDate" in dataToUpdate ? dataToUpdate.driveDate : existing.driveDate;
+    const finalDeadline =
+        "applicationDeadline" in dataToUpdate
+            ? dataToUpdate.applicationDeadline
+            : existing.applicationDeadline;
 
     if (finalDriveDate && finalDeadline && finalDeadline > finalDriveDate) {
-        const error = new Error(
-            "Application deadline cannot be after the scheduled drive date."
-        );
-        error.statusCode = 422;
-        throw error;
+        fail("Application deadline cannot be after the scheduled drive date.", 422);
     }
 
-    // Validate company and role relations if updated
-    const finalCompanyId = companyId !== undefined ? Number(companyId) : existing.companyId;
-    const finalJobRoleId = jobRoleId !== undefined ? Number(jobRoleId) : existing.jobRoleId;
+    // Company / JobRole cross-validation
+    const updatingCompany = rawCompanyId !== undefined;
+    const updatingRole = rawJobRoleId !== undefined;
 
-    if (companyId !== undefined || jobRoleId !== undefined) {
-        const role = await prisma.jobRole.findUnique({
-            where: { id: finalJobRoleId },
-        });
-        if (!role) {
-            const error = new Error(`Job role with ID ${finalJobRoleId} not found.`);
-            error.statusCode = 404;
-            throw error;
-        }
+    if (updatingCompany || updatingRole) {
+        const finalCompanyId = updatingCompany
+            ? parseId(rawCompanyId, "companyId")
+            : existing.companyId;
+        const finalJobRoleId = updatingRole
+            ? parseId(rawJobRoleId, "jobRoleId")
+            : existing.jobRoleId;
 
+        const role = await prisma.jobRole.findUnique({ where: { id: finalJobRoleId } });
+        if (!role) fail(`Job role with ID ${finalJobRoleId} not found.`, 404);
         if (role.companyId !== finalCompanyId) {
-            const error = new Error("Selected job role does not belong to the selected company.");
-            error.statusCode = 422;
-            throw error;
+            fail("Selected job role does not belong to the selected company.", 422);
         }
 
         dataToUpdate.companyId = finalCompanyId;
         dataToUpdate.jobRoleId = finalJobRoleId;
     }
 
+    // Status — only validate here; lifecycle transition is via PATCH /status
     if (status !== undefined) {
         const upperStatus = String(status).toUpperCase();
         if (!VALID_DRIVE_STATUSES.includes(upperStatus)) {
-            const error = new Error(
-                `Invalid status "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`
+            fail(
+                `Invalid status "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`,
+                400
             );
-            error.statusCode = 400;
-            throw error;
         }
         dataToUpdate.status = upperStatus;
     }
 
-    return await prisma.$transaction(async (tx) => {
-        const updated = await tx.placementDrive.update({
-            where: { id: Number(driveId) },
-            data: dataToUpdate,
-        });
+    // Eligibility
+    const eligibility = validateAndNormaliseEligibility(rawEligibility);
+    if (eligibility) {
+        await assertDepartmentsExist(eligibility.departmentIds);
+    }
 
-        // If eligibility criteria is included in update payload
+    return await prisma.$transaction(async (tx) => {
+        await tx.placementDrive.update({ where: { id: driveId }, data: dataToUpdate });
+
         if (eligibility) {
             await tx.eligibilityCriteria.upsert({
-                where: { driveId: Number(driveId) },
+                where: { driveId },
                 update: {
-                    minimumCGPA: eligibility.minimumCGPA !== undefined ? Number(eligibility.minimumCGPA) : undefined,
-                    minimumTenth: eligibility.minimumTenth !== undefined ? Number(eligibility.minimumTenth) : undefined,
-                    minimumTwelfth: eligibility.minimumTwelfth !== undefined ? (eligibility.minimumTwelfth === null ? null : Number(eligibility.minimumTwelfth)) : undefined,
-                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage !== undefined ? (eligibility.minimumDiplomaPercentage === null ? null : Number(eligibility.minimumDiplomaPercentage)) : undefined,
-                    maximumBacklogs: eligibility.maximumBacklogs !== undefined ? Number(eligibility.maximumBacklogs) : undefined,
-                    allowPreviousPlacement: eligibility.allowPreviousPlacement !== undefined ? Boolean(eligibility.allowPreviousPlacement) : undefined,
+                    minimumCGPA: eligibility.minimumCGPA,
+                    minimumTenth: eligibility.minimumTenth,
+                    minimumTwelfth: eligibility.minimumTwelfth,
+                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage,
+                    maximumBacklogs: eligibility.maximumBacklogs,
+                    allowPreviousPlacement: eligibility.allowPreviousPlacement,
                 },
                 create: {
-                    driveId: Number(driveId),
-                    minimumCGPA: eligibility.minimumCGPA !== undefined ? Number(eligibility.minimumCGPA) : 0,
-                    minimumTenth: eligibility.minimumTenth !== undefined ? Number(eligibility.minimumTenth) : 0,
-                    minimumTwelfth: eligibility.minimumTwelfth ? Number(eligibility.minimumTwelfth) : null,
-                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage ? Number(eligibility.minimumDiplomaPercentage) : null,
-                    maximumBacklogs: eligibility.maximumBacklogs !== undefined ? Number(eligibility.maximumBacklogs) : 0,
-                    allowPreviousPlacement: Boolean(eligibility.allowPreviousPlacement),
+                    driveId,
+                    minimumCGPA: eligibility.minimumCGPA,
+                    minimumTenth: eligibility.minimumTenth,
+                    minimumTwelfth: eligibility.minimumTwelfth,
+                    minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage,
+                    maximumBacklogs: eligibility.maximumBacklogs,
+                    allowPreviousPlacement: eligibility.allowPreviousPlacement,
                 },
             });
 
             if (Array.isArray(eligibility.departmentIds)) {
-                await tx.driveEligibleBranch.deleteMany({
-                    where: { driveId: Number(driveId) },
-                });
+                await tx.driveEligibleBranch.deleteMany({ where: { driveId } });
                 if (eligibility.departmentIds.length > 0) {
                     await tx.driveEligibleBranch.createMany({
-                        data: eligibility.departmentIds.map((id) => ({
-                            driveId: Number(driveId),
-                            departmentId: Number(id),
-                        })),
+                        data: eligibility.departmentIds.map((id) => ({ driveId, departmentId: id })),
                         skipDuplicates: true,
                     });
                 }
             }
 
             if (Array.isArray(eligibility.graduationYears)) {
-                await tx.driveEligibleYear.deleteMany({
-                    where: { driveId: Number(driveId) },
-                });
+                await tx.driveEligibleYear.deleteMany({ where: { driveId } });
                 if (eligibility.graduationYears.length > 0) {
                     await tx.driveEligibleYear.createMany({
-                        data: eligibility.graduationYears.map((yr) => ({
-                            driveId: Number(driveId),
-                            graduationYear: Number(yr),
-                        })),
+                        data: eligibility.graduationYears.map((yr) => ({ driveId, graduationYear: yr })),
                         skipDuplicates: true,
                     });
                 }
             }
         }
 
-        return await tx.placementDrive.findUnique({
-            where: { id: updated.id },
-            include: {
-                company: { select: { id: true, name: true } },
-                jobRole: { select: { id: true, title: true } },
-                eligibilityCriteria: true,
-                eligibleBranches: {
-                    include: { department: { select: { id: true, name: true, code: true } } },
-                },
-                eligibleYears: { select: { graduationYear: true } },
-            },
+        const full = await tx.placementDrive.findUnique({
+            where: { id: driveId },
+            include: DRIVE_FULL_INCLUDE,
         });
+
+        return formatDrive(full);
     });
 };
 
 /**
- * Updates drive status with lifecycle validation.
+ * Updates drive status with strict lifecycle transition validation.
+ * The drive record is NOT modified if the transition is invalid.
  */
-const updatePlacementDriveStatus = async (driveId, newStatus) => {
-    const drive = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
-        select: { id: true, status: true },
-    });
+const updatePlacementDriveStatus = async (rawDriveId, newStatus) => {
+    const driveId = parseId(rawDriveId, "driveId");
 
-    if (!drive) {
-        const error = new Error(`Placement drive with ID ${driveId} was not found.`);
-        error.statusCode = 404;
-        throw error;
+    if (!newStatus || !String(newStatus).trim()) {
+        fail('"status" is required.', 400);
     }
 
     const targetStatus = String(newStatus).toUpperCase();
     if (!VALID_DRIVE_STATUSES.includes(targetStatus)) {
-        const error = new Error(
-            `Invalid status "${newStatus}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`
+        fail(
+            `Invalid status "${newStatus}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`,
+            400
         );
-        error.statusCode = 400;
-        throw error;
     }
+
+    // Fetch current status BEFORE any write
+    const drive = await prisma.placementDrive.findUnique({
+        where: { id: driveId },
+        select: { id: true, title: true, status: true },
+    });
+    if (!drive) fail(`Placement drive with ID ${driveId} was not found.`, 404);
 
     if (drive.status === targetStatus) {
         return {
             id: drive.id,
+            title: drive.title,
             status: drive.status,
-            message: `Drive is already in ${targetStatus} status.`,
-            updatedAt: new Date(),
+            message: `Drive is already in "${targetStatus}" status. No changes made.`,
         };
     }
 
-    // Check transition validity
     const allowed = ALLOWED_STATUS_TRANSITIONS[drive.status] || [];
     if (!allowed.includes(targetStatus)) {
-        const error = new Error(
-            `Cannot transition drive status from "${drive.status}" to "${targetStatus}".`
+        // Validation failed — drive is NOT touched
+        fail(
+            `Cannot transition drive status from "${drive.status}" to "${targetStatus}". ` +
+                `Allowed transitions from "${drive.status}": ${
+                    allowed.length ? allowed.join(", ") : "none (terminal state)"
+                }.`,
+            422
         );
-        error.statusCode = 422;
-        throw error;
     }
 
     const updated = await prisma.placementDrive.update({
-        where: { id: Number(driveId) },
+        where: { id: driveId },
         data: { status: targetStatus },
-        select: {
-            id: true,
-            title: true,
-            status: true,
-            updatedAt: true,
-        },
+        select: { id: true, title: true, status: true, updatedAt: true },
     });
 
     return updated;
 };
 
 /**
- * Replaces eligibility criteria atomically for a drive.
+ * Replaces eligibility criteria, branches, and years atomically for a drive.
  */
-const replaceEligibilityCriteria = async (driveId, payload) => {
-    const drive = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
+const replaceEligibilityCriteria = async (rawDriveId, payload) => {
+    const driveId = parseId(rawDriveId, "driveId");
+
+    const drive = await prisma.placementDrive.findUnique({ where: { id: driveId } });
+    if (!drive) fail(`Placement drive with ID ${driveId} was not found.`, 404);
+
+    // Full validation of all criteria fields
+    const eligibility = validateAndNormaliseEligibility({
+        minimumCGPA: payload.minimumCGPA ?? 0,
+        minimumTenth: payload.minimumTenth ?? 0,
+        minimumTwelfth: payload.minimumTwelfth ?? null,
+        minimumDiplomaPercentage: payload.minimumDiplomaPercentage ?? null,
+        maximumBacklogs: payload.maximumBacklogs ?? 0,
+        allowPreviousPlacement: payload.allowPreviousPlacement ?? false,
+        departmentIds: payload.departmentIds ?? [],
+        graduationYears: payload.graduationYears ?? [],
     });
 
-    if (!drive) {
-        const error = new Error(`Placement drive with ID ${driveId} was not found.`);
-        error.statusCode = 404;
-        throw error;
-    }
-
-    const {
-        minimumCGPA = 0,
-        minimumTenth = 0,
-        minimumTwelfth = null,
-        minimumDiplomaPercentage = null,
-        maximumBacklogs = 0,
-        allowPreviousPlacement = false,
-        departmentIds = [],
-        graduationYears = [],
-    } = payload;
-
-    if (Array.isArray(departmentIds) && departmentIds.length > 0) {
-        const existingDepartments = await prisma.department.findMany({
-            where: { id: { in: departmentIds.map((id) => Number(id)) } },
-            select: { id: true },
-        });
-        const found = new Set(existingDepartments.map((d) => d.id));
-        const invalid = departmentIds.filter((id) => !found.has(Number(id)));
-        if (invalid.length > 0) {
-            const error = new Error(`Invalid department IDs: ${invalid.join(", ")}.`);
-            error.statusCode = 404;
-            throw error;
-        }
-    }
+    await assertDepartmentsExist(eligibility.departmentIds);
 
     return await prisma.$transaction(async (tx) => {
         const criteria = await tx.eligibilityCriteria.upsert({
-            where: { driveId: Number(driveId) },
+            where: { driveId },
             update: {
-                minimumCGPA: Number(minimumCGPA),
-                minimumTenth: Number(minimumTenth),
-                minimumTwelfth: minimumTwelfth !== null ? Number(minimumTwelfth) : null,
-                minimumDiplomaPercentage: minimumDiplomaPercentage !== null ? Number(minimumDiplomaPercentage) : null,
-                maximumBacklogs: Number(maximumBacklogs),
-                allowPreviousPlacement: Boolean(allowPreviousPlacement),
+                minimumCGPA: eligibility.minimumCGPA,
+                minimumTenth: eligibility.minimumTenth,
+                minimumTwelfth: eligibility.minimumTwelfth,
+                minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage,
+                maximumBacklogs: eligibility.maximumBacklogs,
+                allowPreviousPlacement: eligibility.allowPreviousPlacement,
             },
             create: {
-                driveId: Number(driveId),
-                minimumCGPA: Number(minimumCGPA),
-                minimumTenth: Number(minimumTenth),
-                minimumTwelfth: minimumTwelfth !== null ? Number(minimumTwelfth) : null,
-                minimumDiplomaPercentage: minimumDiplomaPercentage !== null ? Number(minimumDiplomaPercentage) : null,
-                maximumBacklogs: Number(maximumBacklogs),
-                allowPreviousPlacement: Boolean(allowPreviousPlacement),
+                driveId,
+                minimumCGPA: eligibility.minimumCGPA,
+                minimumTenth: eligibility.minimumTenth,
+                minimumTwelfth: eligibility.minimumTwelfth,
+                minimumDiplomaPercentage: eligibility.minimumDiplomaPercentage,
+                maximumBacklogs: eligibility.maximumBacklogs,
+                allowPreviousPlacement: eligibility.allowPreviousPlacement,
             },
         });
 
-        // Sync branches
-        await tx.driveEligibleBranch.deleteMany({
-            where: { driveId: Number(driveId) },
-        });
-
-        if (Array.isArray(departmentIds) && departmentIds.length > 0) {
+        await tx.driveEligibleBranch.deleteMany({ where: { driveId } });
+        if (eligibility.departmentIds.length > 0) {
             await tx.driveEligibleBranch.createMany({
-                data: departmentIds.map((deptId) => ({
-                    driveId: Number(driveId),
-                    departmentId: Number(deptId),
-                })),
+                data: eligibility.departmentIds.map((id) => ({ driveId, departmentId: id })),
                 skipDuplicates: true,
             });
         }
 
-        // Sync graduation years
-        await tx.driveEligibleYear.deleteMany({
-            where: { driveId: Number(driveId) },
-        });
-
-        if (Array.isArray(graduationYears) && graduationYears.length > 0) {
+        await tx.driveEligibleYear.deleteMany({ where: { driveId } });
+        if (eligibility.graduationYears.length > 0) {
             await tx.driveEligibleYear.createMany({
-                data: graduationYears.map((yr) => ({
-                    driveId: Number(driveId),
-                    graduationYear: Number(yr),
-                })),
+                data: eligibility.graduationYears.map((yr) => ({ driveId, graduationYear: yr })),
                 skipDuplicates: true,
             });
         }
 
         const branches = await tx.driveEligibleBranch.findMany({
-            where: { driveId: Number(driveId) },
+            where: { driveId },
             include: { department: { select: { id: true, name: true, code: true } } },
         });
-
         const years = await tx.driveEligibleYear.findMany({
-            where: { driveId: Number(driveId) },
+            where: { driveId },
             select: { graduationYear: true },
         });
 
         return {
-            driveId: Number(driveId),
+            driveId,
             minimumCGPA: criteria.minimumCGPA,
             minimumTenth: criteria.minimumTenth,
             minimumTwelfth: criteria.minimumTwelfth,
