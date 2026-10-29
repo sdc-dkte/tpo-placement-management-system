@@ -130,6 +130,31 @@ async function runTests() {
             venue: "Auditorium Hall B",
         });
         console.log("✔ PASSED: Drive updated. New Package LPA:", updated.packageLPA);
+        // 7.1 Test: General drive update must reject status changes
+        try {
+            await driveService.updatePlacementDrive(createdDrive.id, {
+                status: "CANCELLED",
+            });
+
+            console.error(
+                "✖ FAILED: General update allowed a status change!"
+            );
+        } catch (err) {
+            if (
+                err.statusCode === 400 &&
+                err.message.includes("PATCH /drives/:driveId/status")
+            ) {
+                console.log(
+                    "✔ PASSED: General update correctly rejected status changes."
+                );
+            } else {
+                console.error(
+                    "✖ FAILED: Unexpected error for status protection:",
+                    err.statusCode,
+                    err.message
+                );
+            }
+        }
 
         // 8. Test Status Transitions
         const ongoingStatus = await driveService.updatePlacementDriveStatus(createdDrive.id, "ONGOING");

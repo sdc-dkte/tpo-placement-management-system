@@ -179,11 +179,18 @@ const getEligibilityCriteria = async (req, res) => {
             });
         }
 
+        if (!drive.eligibilityCriteria) {
+            return res.status(404).json({
+                success: false,
+                message: "Eligibility criteria not found for this drive.",
+            });
+        }
+
         return res.status(200).json({
             success: true,
             data: {
                 driveId: drive.id,
-                ...drive.eligibility,
+                ...drive.eligibilityCriteria,
             },
         });
     } catch (error) {

@@ -202,7 +202,98 @@ const createPlacementDrive = async (payload) => {
 /**
  * Lists all drives with comprehensive filtering, search, and pagination.
  */
+
 const getAllPlacementDrives = async (query = {}) => {
+    if (!query || typeof query !== "object" || Array.isArray(query)) {
+        const error = new Error("Query parameters must be an object.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const allowedSortFields = [
+        "createdAt",
+        "driveDate",
+        "applicationDeadline",
+        "packageLPA",
+        "title",
+        "status",
+    ];
+
+    const allowedStatuses = VALID_DRIVE_STATUSES;
+
+    const invalidQuery = (message) => {
+        const error = new Error(message);
+        error.statusCode = 400;
+        throw error;
+    };
+
+    const parsePositiveInteger = (value, field, defaultValue) => {
+        if (value === undefined || value === "") {
+            return defaultValue;
+        }
+
+        const number = Number(value);
+
+        if (!Number.isSafeInteger(number) || number < 1) {
+            invalidQuery(`${field} must be a positive integer.`);
+        }
+
+        return number;
+    };
+
+    const pageNum = parsePositiveInteger(query.page, "page", 1);
+    const limitNum = parsePositiveInteger(query.limit, "limit", 20);
+
+    if (limitNum > 100) {
+        invalidQuery("limit cannot exceed 100.");
+    }
+
+    for (const field of ["companyId", "jobRoleId", "departmentId"]) {
+        if (query[field] !== undefined && query[field] !== "") {
+            const value = Number(query[field]);
+
+            if (!Number.isSafeInteger(value) || value < 1) {
+                invalidQuery(`${field} must be a positive integer.`);
+            }
+        }
+    }
+
+    if (query.graduationYear !== undefined && query.graduationYear !== "") {
+        const year = Number(query.graduationYear);
+
+        if (!Number.isSafeInteger(year) || year < 2000 || year > 2100) {
+            invalidQuery("graduationYear must be a valid year.");
+        }
+    }
+
+    if (query.status !== undefined && query.status !== "") {
+        if (
+            typeof query.status !== "string" ||
+            !allowedStatuses.includes(query.status.toUpperCase())
+        ) {
+            invalidQuery("Invalid drive status.");
+        }
+    }
+
+    if (
+        query.sortBy !== undefined &&
+        !allowedSortFields.includes(query.sortBy)
+    ) {
+        invalidQuery("Invalid sortBy field.");
+    }
+
+    if (
+        query.sortOrder !== undefined &&
+        !["asc", "desc"].includes(String(query.sortOrder).toLowerCase())
+    ) {
+        invalidQuery("sortOrder must be 'asc' or 'desc'.");
+    }
+
+    if (query.search !== undefined && typeof query.search !== "string") {
+        invalidQuery("search must be a string.");
+    }
+
+
     const {
         page = 1,
         limit = 20,
@@ -216,8 +307,7 @@ const getAllPlacementDrives = async (query = {}) => {
         sortOrder = "desc",
     } = query;
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+
     const skip = (pageNum - 1) * limitNum;
 
     const where = {};
@@ -260,7 +350,7 @@ const getAllPlacementDrives = async (query = {}) => {
     }
 
     // Allowed sort fields to avoid SQL injection
-    const allowedSortFields = ["createdAt", "driveDate", "applicationDeadline", "packageLPA", "title", "status"];
+
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortDirection = String(sortOrder).toLowerCase() === "asc" ? "asc" : "desc";
 
@@ -289,7 +379,8 @@ const getAllPlacementDrives = async (query = {}) => {
         }),
     ]);
 
-    const totalPages = Math.ceil(total / limitNum) || 1;
+
+    const totalPages = Math.ceil(total / limitNum);
 
     // Transform drives for consistent, intuitive client output
     const formattedData = drives.map((d) => ({
@@ -517,15 +608,11 @@ const updatePlacementDrive = async (driveId, payload) => {
     }
 
     if (status !== undefined) {
-        const upperStatus = String(status).toUpperCase();
-        if (!VALID_DRIVE_STATUSES.includes(upperStatus)) {
-            const error = new Error(
-                `Invalid status "${status}". Allowed values: ${VALID_DRIVE_STATUSES.join(", ")}.`
-            );
-            error.statusCode = 400;
-            throw error;
-        }
-        dataToUpdate.status = upperStatus;
+        const error = new Error(
+            "Use PATCH /drives/:driveId/status to update the drive status."
+        );
+        error.statusCode = 400;
+        throw error;
     }
 
     return await prisma.$transaction(async (tx) => {
@@ -646,9 +733,27 @@ const updatePlacementDriveStatus = async (driveId, newStatus) => {
         throw error;
     }
 
-    const updated = await prisma.placementDrive.update({
+
+    const result = await prisma.placementDrive.updateMany({
+        where: {
+            id: Number(driveId),
+            status: drive.status,
+        },
+        data: {
+            status: targetStatus,
+        },
+    });
+
+    if (result.count === 0) {
+        const error = new Error(
+            "Drive status changed concurrently. Please refresh and try again."
+        );
+        error.statusCode = 409;
+        throw error;
+    }
+
+    const updated = await prisma.placementDrive.findUnique({
         where: { id: Number(driveId) },
-        data: { status: targetStatus },
         select: {
             id: true,
             title: true,
@@ -658,6 +763,7 @@ const updatePlacementDriveStatus = async (driveId, newStatus) => {
     });
 
     return updated;
+
 };
 
 /**
@@ -674,6 +780,17 @@ const replaceEligibilityCriteria = async (driveId, payload) => {
         throw error;
     }
 
+
+    const error = (message) => {
+        const err = new Error(message);
+        err.statusCode = 400;
+        throw err;
+    };
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        error("Eligibility criteria payload must be an object.");
+    }
+
     const {
         minimumCGPA = 0,
         minimumTenth = 0,
@@ -684,6 +801,77 @@ const replaceEligibilityCriteria = async (driveId, payload) => {
         departmentIds = [],
         graduationYears = [],
     } = payload;
+
+    const validateNumber = (value, field, min, max, optional = false) => {
+        if (optional && value === null) return;
+
+        if (
+            value === "" ||
+            value === undefined ||
+            typeof value === "boolean" ||
+            !Number.isFinite(Number(value)) ||
+            Number(value) < min ||
+            Number(value) > max
+        ) {
+            error(`${field} must be a number between ${min} and ${max}.`);
+        }
+    };
+
+    validateNumber(minimumCGPA, "minimumCGPA", 0, 10);
+    validateNumber(minimumTenth, "minimumTenth", 0, 100);
+    validateNumber(minimumTwelfth, "minimumTwelfth", 0, 100, true);
+    validateNumber(
+        minimumDiplomaPercentage,
+        "minimumDiplomaPercentage",
+        0,
+        100,
+        true
+    );
+    validateNumber(maximumBacklogs, "maximumBacklogs", 0, 100);
+
+    if (!Number.isInteger(Number(maximumBacklogs))) {
+        error("maximumBacklogs must be an integer.");
+    }
+
+    if (typeof allowPreviousPlacement !== "boolean") {
+        error("allowPreviousPlacement must be a boolean.");
+    }
+
+    if (!Array.isArray(departmentIds)) {
+        error("departmentIds must be an array.");
+    }
+
+    if (!Array.isArray(graduationYears)) {
+        error("graduationYears must be an array.");
+    }
+
+    for (const id of departmentIds) {
+        if (
+            !Number.isSafeInteger(Number(id)) ||
+            Number(id) <= 0
+        ) {
+            error(`Invalid department ID: ${id}`);
+        }
+    }
+
+    for (const year of graduationYears) {
+        if (
+            !Number.isSafeInteger(Number(year)) ||
+            Number(year) < 2000 ||
+            Number(year) > 2100
+        ) {
+            error(`Invalid graduation year: ${year}`);
+        }
+    }
+
+    if (new Set(departmentIds.map(Number)).size !== departmentIds.length) {
+        error("departmentIds must not contain duplicates.");
+    }
+
+    if (new Set(graduationYears.map(Number)).size !== graduationYears.length) {
+        error("graduationYears must not contain duplicates.");
+    }
+
 
     if (Array.isArray(departmentIds) && departmentIds.length > 0) {
         const existingDepartments = await prisma.department.findMany({

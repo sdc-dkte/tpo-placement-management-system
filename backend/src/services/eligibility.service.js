@@ -94,29 +94,34 @@ const evaluateStudentEligibility = (
 
         // 6. Active Backlogs Check
         const maxBacklogs = criteria.maximumBacklogs ?? 0;
-        const currentBacklogs = student.activeBacklogs ?? 0;
-        if (currentBacklogs > maxBacklogs) {
+        const currentBacklogs = student.activeBacklogs;
+
+        if (
+            currentBacklogs === null ||
+            currentBacklogs === undefined ||
+            !Number.isInteger(Number(currentBacklogs)) ||
+            Number(currentBacklogs) < 0
+        ) {
+            reasons.push("Active backlog information is missing or invalid.");
+        } else if (Number(currentBacklogs) > Number(maxBacklogs)) {
             reasons.push(
                 `Active backlogs (${currentBacklogs}) exceed the maximum allowed (${maxBacklogs}).`
             );
         }
+      
+
 
         // 7. Previous Placement / Single Offer Policy Check
         if (criteria.allowPreviousPlacement === false) {
-            // Check if student already has an official selection
-            const hasSelection = Boolean(
-                student.selection ||
-                (student.driveParticipations &&
-                    student.driveParticipations.some(
-                        (p) => p.processStatus === "SELECTED"
-                    ))
-            );
+            const hasSelection = student.selection != null;
+
             if (hasSelection) {
                 reasons.push(
                     "Student has already been placed and this drive does not permit previously placed students."
                 );
             }
         }
+
     }
 
     return {
