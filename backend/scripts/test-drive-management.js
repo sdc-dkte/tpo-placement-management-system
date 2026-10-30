@@ -83,6 +83,36 @@ async function runTests() {
             console.log("✔ PASSED: Role belonging to another company was properly rejected (Status:", err.statusCode, ")");
         }
 
+        // 3.1 Test: Non-existent department ID must be rejected during creation
+        try {
+            await driveService.createPlacementDrive({
+                companyId: testCompany.id,
+                jobRoleId: testRole.id,
+                title: "Invalid Department Drive",
+                packageLPA: 8.0,
+                eligibility: {
+                    departmentIds: [999999],
+                },
+            });
+
+            console.error("✖ FAILED: Non-existent department ID was accepted during creation!");
+        } catch (err) {
+            if (
+                err.statusCode === 400 &&
+                err.message.startsWith("Department IDs not found:")
+            ) {
+                console.log(
+                    "✔ PASSED: Non-existent department ID rejected during creation."
+                );
+            } else {
+                console.error(
+                    "✖ FAILED: Unexpected creation validation error:",
+                    err.statusCode,
+                    err.message
+                );
+            }
+        }
+
         // 4. Test Creation of Drive with full criteria
         createdDrive = await driveService.createPlacementDrive({
             companyId: testCompany.id,
@@ -130,6 +160,31 @@ async function runTests() {
             venue: "Auditorium Hall B",
         });
         console.log("✔ PASSED: Drive updated. New Package LPA:", updated.packageLPA);
+        // 7.0.1 Test: Non-existent department ID must be rejected during update
+        try {
+            await driveService.updatePlacementDrive(createdDrive.id, {
+                eligibility: {
+                    departmentIds: [999999],
+                },
+            });
+
+            console.error("✖ FAILED: Non-existent department ID was accepted during update!");
+        } catch (err) {
+            if (
+                err.statusCode === 400 &&
+                err.message.startsWith("One or more department IDs do not exist")
+            ) {
+                console.log(
+                    "✔ PASSED: Non-existent department ID rejected during update."
+                );
+            } else {
+                console.error(
+                    "✖ FAILED: Unexpected update validation error:",
+                    err.statusCode,
+                    err.message
+                );
+            }
+        }
         // 7.1 Test: General drive update must reject status changes
         try {
             await driveService.updatePlacementDrive(createdDrive.id, {
