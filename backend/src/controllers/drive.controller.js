@@ -162,11 +162,6 @@ const updateDriveStatus = async (req, res) => {
         });
     }
 };
-
-/**
- * Gets eligibility criteria for a specific drive.
- * GET /api/v1/drives/:driveId/eligibility-criteria
- */
 const getEligibilityCriteria = async (req, res) => {
     try {
         const driveId = req.params.driveId || req.params.id;
@@ -179,7 +174,7 @@ const getEligibilityCriteria = async (req, res) => {
             });
         }
 
-        if (!drive.eligibilityCriteria) {
+        if (!drive.eligibility) {
             return res.status(404).json({
                 success: false,
                 message: "Eligibility criteria not found for this drive.",
@@ -190,7 +185,7 @@ const getEligibilityCriteria = async (req, res) => {
             success: true,
             data: {
                 driveId: drive.id,
-                ...drive.eligibilityCriteria,
+                ...drive.eligibility,
             },
         });
     } catch (error) {
