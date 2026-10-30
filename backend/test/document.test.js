@@ -14,6 +14,7 @@ const uploadDirectory = require("node:fs").mkdtempSync(
 );
 process.env.DOCUMENT_UPLOAD_DIR = uploadDirectory;
 const { recoverStagedDocumentFiles } = require("../src/utils/documentFiles");
+const { listenAfterRecovery } = require("../src/utils/serverStartup");
 
 const state = {
     createError: null,
@@ -23,7 +24,15 @@ const state = {
     keepRecordOnDelete: false,
     findManyArgs: null,
     student: { id: 1 },
+    documents: null,
+    activeDeleteCount: 0,
+    maxActiveDeleteCount: 0,
+    deleteDelay: 0,
+    studentFindManyArgs: null,
 };
+
+const getDocument = (id) =>
+    state.documents ? state.documents.get(id) : state.document;
 
 const prisma = {
     student: {
@@ -35,20 +44,47 @@ const prisma = {
             state.document = { id: 7, ...data, studentId: 1 };
             return state.document;
         },
-        findFirst: async () => state.document,
-        findUnique: async () => {
+        findFirst: async ({ where }) => {
+            const document = getDocument(where.id);
+            return where.studentId && document?.studentId !== where.studentId
+                ? null
+                : document;
+        },
+        findUnique: async ({ where }) => {
             if (state.findUniqueError) throw state.findUniqueError;
-            return state.document;
+            return getDocument(where.id);
         },
         findMany: async (args) => {
-            state.findManyArgs = args;
+            if (args.where?.studentId) {
+                state.studentFindManyArgs = args;
+            } else {
+                state.findManyArgs = args;
+            }
             return [];
         },
         count: async () => 0,
-        delete: async () => {
-            if (state.deleteError) throw state.deleteError;
-            if (!state.keepRecordOnDelete) state.document = null;
-            return null;
+        delete: async ({ where }) => {
+            state.activeDeleteCount++;
+            state.maxActiveDeleteCount = Math.max(
+                state.maxActiveDeleteCount,
+                state.activeDeleteCount
+            );
+            try {
+                if (state.deleteDelay) {
+                    await new Promise((resolve) =>
+                        setTimeout(resolve, state.deleteDelay)
+                    );
+                }
+                if (state.deleteError) throw state.deleteError;
+                if (state.documents) {
+                    state.documents.delete(where.id);
+                } else if (!state.keepRecordOnDelete) {
+                    state.document = null;
+                }
+                return null;
+            } finally {
+                state.activeDeleteCount--;
+            }
         },
     },
 };
@@ -63,6 +99,14 @@ require.cache[prismaModulePath] = prismaModule;
 const documentRouter = require("../src/routes/document.routes");
 const app = express();
 app.use("/documents", documentRouter);
+app.use((error, req, res, next) => {
+    console.error(error);
+    if (res.headersSent) return next(error);
+    return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+    });
+});
 
 let server;
 let baseUrl;
@@ -72,6 +116,44 @@ const makeToken = (role, id = 10) =>
 
 const authorization = (role, id) => ({
     Authorization: `Bearer ${makeToken(role, id)}`,
+});
+
+test("does not begin listening before recovery completes", async () => {
+    let recoveryComplete = false;
+    let listenCalled = false;
+
+    const startup = listenAfterRecovery(
+        async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            recoveryComplete = true;
+        },
+        () => {
+            assert.equal(recoveryComplete, true);
+            listenCalled = true;
+            return "server";
+        }
+    );
+
+    assert.equal(listenCalled, false);
+    assert.equal(await startup, "server");
+    assert.equal(listenCalled, true);
+});
+
+test("does not listen when initial recovery fails", async () => {
+    let listenCalled = false;
+
+    await assert.rejects(
+        listenAfterRecovery(
+            async () => {
+                throw new Error("recovery failed");
+            },
+            () => {
+                listenCalled = true;
+            }
+        ),
+        /recovery failed/
+    );
+    assert.equal(listenCalled, false);
 });
 
 const uploadDocument = async ({
@@ -105,6 +187,11 @@ beforeEach(() => {
     state.document = null;
     state.findUniqueError = null;
     state.keepRecordOnDelete = false;
+    state.documents = null;
+    state.activeDeleteCount = 0;
+    state.maxActiveDeleteCount = 0;
+    state.deleteDelay = 0;
+    state.studentFindManyArgs = null;
     state.findManyArgs = null;
     state.student = { id: 1 };
 });
@@ -145,6 +232,25 @@ test("returns an explicit size-limit error", async () => {
     assert.deepEqual(await currentFiles(), []);
 });
 
+test("does not expose filesystem details from upload storage errors", async () => {
+    const originalMkdir = fs.mkdir;
+    fs.mkdir = async () => {
+        throw new Error("storage failed at /private/uploads/documents");
+    };
+
+    let response;
+    try {
+        response = await uploadDocument();
+    } finally {
+        fs.mkdir = originalMkdir;
+    }
+
+    assert.equal(response.status, 500);
+    const body = await response.json();
+    assert.equal(body.message, "Internal server error");
+    assert.doesNotMatch(JSON.stringify(body), /private|uploads|storage failed/i);
+});
+
 test("rejects unsupported document types and removes the uploaded file", async () => {
     const response = await uploadDocument({ type: "PASSPORT" });
 
@@ -183,6 +289,9 @@ test("stores an uploaded document under a generated server-side filename", async
 });
 
 test("allows only students to use student document routes and TPO/students to download", async () => {
+    const unauthenticated = await fetch(`${baseUrl}/documents/student`);
+    assert.equal(unauthenticated.status, 401);
+
     const tpoStudentList = await fetch(`${baseUrl}/documents/student`, {
         headers: authorization("TPO"),
     });
@@ -220,6 +329,15 @@ test("allows only students to use student document routes and TPO/students to do
     await studentDownload.arrayBuffer();
 });
 
+test("lists only the signed-in student's documents", async () => {
+    const response = await fetch(`${baseUrl}/documents/student`, {
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(state.studentFindManyArgs.where.studentId, state.student.id);
+});
+
 test("prevents students from downloading another student's document", async () => {
     state.document = {
         id: 7,
@@ -233,6 +351,43 @@ test("prevents students from downloading another student's document", async () =
     });
 
     assert.equal(response.status, 403);
+});
+
+test("prevents students from deleting another student's document", async () => {
+    const fileName = "another-students-file.pdf";
+    const filePath = path.join(uploadDirectory, fileName);
+    const content = "%PDF-not owned";
+    await fs.writeFile(filePath, content);
+    state.document = {
+        id: 7,
+        studentId: 2,
+        fileName,
+        fileUrl: `/uploads/documents/${fileName}`,
+    };
+
+    const response = await fetch(`${baseUrl}/documents/student/7`, {
+        method: "DELETE",
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 404);
+    assert.equal(state.document.studentId, 2);
+    assert.equal(await fs.readFile(filePath, "utf8"), content);
+});
+
+test("returns 404 when a document's file is missing", async () => {
+    state.document = {
+        id: 7,
+        studentId: 1,
+        fileName: "missing.pdf",
+        fileUrl: "/uploads/documents/missing.pdf",
+    };
+
+    const response = await fetch(`${baseUrl}/documents/7/download`, {
+        headers: authorization("STUDENT"),
+    });
+
+    assert.equal(response.status, 404);
 });
 
 test("restores the document file when database deletion fails", async () => {
@@ -438,6 +593,62 @@ test("retains staged files when cleanup fails and retries them later", async () 
     assert.equal(state.document, null);
 });
 
+test("serializes concurrent document deletions", async () => {
+    state.documents = new Map([
+        [
+            7,
+            {
+                id: 7,
+                studentId: 1,
+                fileName: "concurrent-7.pdf",
+                fileUrl: "/uploads/documents/concurrent-7.pdf",
+            },
+        ],
+        [
+            8,
+            {
+                id: 8,
+                studentId: 1,
+                fileName: "concurrent-8.pdf",
+                fileUrl: "/uploads/documents/concurrent-8.pdf",
+            },
+        ],
+    ]);
+    state.deleteDelay = 20;
+    await Promise.all([
+        fs.writeFile(
+            path.join(uploadDirectory, "concurrent-7.pdf"),
+            "%PDF-7"
+        ),
+        fs.writeFile(
+            path.join(uploadDirectory, "concurrent-8.pdf"),
+            "%PDF-8"
+        ),
+    ]);
+
+    const responses = await Promise.all(
+        [7, 8].map((id) =>
+            fetch(`${baseUrl}/documents/student/${id}`, {
+                method: "DELETE",
+                headers: authorization("STUDENT"),
+            })
+        )
+    );
+
+    assert.deepEqual(
+        responses.map((response) => response.status),
+        [200, 200]
+    );
+    assert.equal(state.maxActiveDeleteCount, 1);
+    assert.equal(state.documents.size, 0);
+    await assert.rejects(fs.access(path.join(uploadDirectory, "concurrent-7.pdf")), {
+        code: "ENOENT",
+    });
+    await assert.rejects(fs.access(path.join(uploadDirectory, "concurrent-8.pdf")), {
+        code: "ENOENT",
+    });
+});
+
 test("preserves staged files when database state cannot be checked", async () => {
     const stagedPath = path.join(
         uploadDirectory,
@@ -453,10 +664,22 @@ test("preserves staged files when database state cannot be checked", async () =>
     };
     state.findUniqueError = new Error("database unavailable");
 
-    await recoverStagedDocumentFiles(prisma);
+    await assert.rejects(
+        recoverStagedDocumentFiles(prisma),
+        /could not be fully recovered/i
+    );
 
     assert.equal(await fs.readFile(stagedPath, "utf8"), content);
     assert.equal(state.document.id, 7);
+    state.findUniqueError = null;
+    await recoverStagedDocumentFiles(prisma);
+    assert.equal(
+        await fs.readFile(
+            path.join(uploadDirectory, "database-check.pdf"),
+            "utf8"
+        ),
+        content
+    );
 });
 
 test("validates document IDs as positive integers", async () => {

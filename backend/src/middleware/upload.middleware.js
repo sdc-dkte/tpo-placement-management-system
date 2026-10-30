@@ -79,10 +79,14 @@ const handleDocumentUpload = (req, res, next) => {
                 });
             }
 
-            return res.status(error.statusCode || 400).json({
-                success: false,
-                message: error.message,
-            });
+            if (error.statusCode === 400) {
+                return res.status(400).json({
+                    success: false,
+                    message: error.message,
+                });
+            }
+
+            return next(error);
         }
 
         if (!req.file) return next();

@@ -8,6 +8,7 @@ const {
     recoverStagedDocumentFiles,
     withDocumentFileOperation,
 } = require("./utils/documentFiles");
+const { listenAfterRecovery } = require("./utils/serverStartup");
 
 // Routes
 const healthRoutes = require("./routes/health.routes");
@@ -131,6 +132,9 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
+let server;
+let documentRecoveryInterval;
+
 const recoverDocumentFiles = () =>
     withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)).catch(
         (error) => {
@@ -138,14 +142,32 @@ const recoverDocumentFiles = () =>
         }
     );
 
-const server = app.listen(PORT, HOST, () => {
-    console.log(`🚀 TPO API running at http://localhost:${PORT}`);
-    console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
-    recoverDocumentFiles();
-});
+const startServer = async () => {
+    server = await listenAfterRecovery(
+        () =>
+            withDocumentFileOperation(() =>
+                recoverStagedDocumentFiles(prisma)
+            ),
+        () =>
+            app.listen(PORT, HOST, () => {
+                console.log(`🚀 TPO API running at http://localhost:${PORT}`);
+                console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+            })
+    );
 
-const documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
-documentRecoveryInterval.unref();
+    documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
+    documentRecoveryInterval.unref();
+};
+
+startServer().catch(async (error) => {
+    console.error("Initial document file recovery failed; server was not started:", error);
+    process.exitCode = 1;
+    try {
+        await prisma.$disconnect();
+    } catch (disconnectError) {
+        console.error("Failed to disconnect Prisma after startup failure:", disconnectError);
+    }
+});
 
 // ====================
 // 7. Graceful Shutdown
@@ -153,9 +175,11 @@ documentRecoveryInterval.unref();
 
 const shutdown = async (signal) => {
     console.log(`${signal} received. Shutting down server...`);
-    clearInterval(documentRecoveryInterval);
+    if (documentRecoveryInterval) {
+        clearInterval(documentRecoveryInterval);
+    }
 
-    server.close(async () => {
+    const disconnect = async () => {
         try {
             await prisma.$disconnect();
             console.log("Database disconnected.");
@@ -164,7 +188,13 @@ const shutdown = async (signal) => {
             console.error("Shutdown error:", error);
             process.exit(1);
         }
-    });
+    };
+
+    if (server) {
+        server.close(disconnect);
+    } else {
+        await disconnect();
+    }
 };
 
 process.on("SIGINT", () => shutdown("SIGINT"));

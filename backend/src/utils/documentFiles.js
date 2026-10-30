@@ -114,6 +114,7 @@ const recoverStagedDocumentFiles = async (prisma) => {
     }
 
     const stagedFilePattern = /^\.staged-delete-(\d+)-[0-9a-f-]{36}$/;
+    const recoveryErrors = [];
 
     for (const entry of entries) {
         if (!entry.name.startsWith(STAGED_DELETE_PREFIX)) continue;
@@ -122,9 +123,11 @@ const recoverStagedDocumentFiles = async (prisma) => {
         const match = entry.name.match(stagedFilePattern);
 
         if (!match || (!entry.isFile() && !entry.isSymbolicLink())) {
-            console.error(
+            const error = new Error(
                 `Unrecognized staged document file requires manual recovery: ${stagedPath}`
             );
+            console.error(error.message);
+            recoveryErrors.push(error);
             continue;
         }
 
@@ -139,23 +142,28 @@ const recoverStagedDocumentFiles = async (prisma) => {
                 `Could not check document ${documentId}; staged file was preserved at ${stagedPath}:`,
                 error
             );
+            recoveryErrors.push(error);
             continue;
         }
 
         if (document) {
             const originalPath = resolveDocumentPath(document.fileUrl);
             if (!originalPath) {
-                console.error(
+                const error = new Error(
                     `Document ${documentId} has an invalid file path; staged file was preserved at ${stagedPath}.`
                 );
+                console.error(error.message);
+                recoveryErrors.push(error);
                 continue;
             }
 
             try {
                 if (!(await isRealPathInsideUploadDirectory(stagedPath))) {
-                    console.error(
+                    const error = new Error(
                         `Staged file for document ${documentId} resolves outside the upload directory; it was preserved at ${stagedPath}.`
                     );
+                    console.error(error.message);
+                    recoveryErrors.push(error);
                     continue;
                 }
             } catch (error) {
@@ -163,14 +171,17 @@ const recoverStagedDocumentFiles = async (prisma) => {
                     `Could not verify staged file for document ${documentId}; it was preserved at ${stagedPath}:`,
                     error
                 );
+                recoveryErrors.push(error);
                 continue;
             }
 
             try {
                 await fs.access(originalPath);
-                console.error(
+                const error = new Error(
                     `Both original and staged files exist for document ${documentId}; staged file was preserved at ${stagedPath}.`
                 );
+                console.error(error.message);
+                recoveryErrors.push(error);
                 continue;
             } catch (error) {
                 if (error.code !== "ENOENT") {
@@ -178,6 +189,7 @@ const recoverStagedDocumentFiles = async (prisma) => {
                         `Could not inspect document ${documentId}; staged file was preserved at ${stagedPath}:`,
                         error
                     );
+                    recoveryErrors.push(error);
                     continue;
                 }
             }
@@ -189,6 +201,7 @@ const recoverStagedDocumentFiles = async (prisma) => {
                     `Could not restore document ${documentId}; staged file remains at ${stagedPath}:`,
                     error
                 );
+                recoveryErrors.push(error);
             }
             continue;
         }
@@ -201,8 +214,16 @@ const recoverStagedDocumentFiles = async (prisma) => {
                     `Document ${documentId} was deleted but staged-file cleanup remains pending at ${stagedPath}:`,
                     error
                 );
+                recoveryErrors.push(error);
             }
         }
+    }
+
+    if (recoveryErrors.length > 0) {
+        throw new AggregateError(
+            recoveryErrors,
+            "One or more staged document files could not be fully recovered."
+        );
     }
 };
 
