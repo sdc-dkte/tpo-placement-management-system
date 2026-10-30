@@ -1,10 +1,11 @@
 import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import { Loader2 } from 'lucide-react';
 
-export default function ProtectedRoute() {
-  const { isAuthenticated, isLoading } = useAuth();
+export default function ProtectedRoute({ allowedRoles }) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
@@ -20,6 +21,17 @@ export default function ProtectedRoute() {
   }
 
   if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Role-based access control: enforce permissions if allowedRoles specified
+  if (allowedRoles && allowedRoles.length > 0 && !allowedRoles.includes(user?.role)) {
+    if (user?.role === 'STUDENT') {
+      return <Navigate to="/portal/dossier" replace />;
+    }
+    if (user?.role === 'TPO') {
+      return <Navigate to="/students" replace />;
+    }
     return <Navigate to="/login" replace />;
   }
 
