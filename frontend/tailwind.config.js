@@ -7,6 +7,14 @@ export default {
   theme: {
     extend: {
       colors: {
+        dkte: {
+          gold: "#FECC00",
+          "gold-hover": "#E5B800",
+          dark: "#111827",
+          navy: "#0B1F3A",
+          canvas: "#F8FAFC",
+          border: "#E5E7EB",
+        },
         brand: {
           yellow: '#FECC00',        // Official DKTE Brand Yellow
           yellowHover: '#E5B800',
@@ -41,6 +49,7 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       borderRadius: {
         DEFAULT: '0.25rem',  // 4px ROUND_FOUR standard
@@ -53,8 +62,9 @@ export default {
       boxShadow: {
         none: 'none',
         hairline: '0 0 0 1px rgba(0, 0, 0, 0.05)',
+        xs: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
       },
     },
   },
   plugins: [],
-}
+};

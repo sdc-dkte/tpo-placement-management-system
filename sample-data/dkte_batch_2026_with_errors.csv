@@ -1,0 +1,11 @@
+PRN,name,email,departmentCode,graduationYear,academicPathway,CGPA,tenthPercentage,twelfthPercentage,diplomaPercentage,activeBacklogs
+26CS101,Harshvardhan Shinde,harshvardhan.s@dkte.ac.in,CSE,2026,HSC,8.85,88.50,86.20,,0
+26CS102,Mayur Patil,mayur.patil_at_dkte.ac.in,CSE,2026,HSC,8.10,82.00,80.50,,0
+26RB103,Shubham Kulkarni,shubham.k@dkte.ac.in,ROBOTICS,2026,HSC,8.40,84.00,81.00,,0
+26AD104,Pranali Desai,pranali.d@dkte.ac.in,AIDS,2026,HSC,11.20,95.00,92.00,,0
+26ET105,Gaurav Jadhav,gaurav.j@dkte.ac.in,ENTC,2026,HSC,7.90,81.00,,,0
+26ME106,Rupali Mane,rupali.m@dkte.ac.in,MECH,2026,DIPLOMA,7.80,78.50,,,0
+26AL107,Nikhil Mohite,nikhil.m@dkte.ac.in,AIML,2026,CBSE,8.50,85.00,83.00,,0
+26CV108,Amol Kamble,amol.k@dkte.ac.in,CIVIL,2026,HSC,7.20,74.00,71.00,,-2
+22CS001,Aarav Sharma Duplicate,aarav.duplicate@dkte.ac.in,CSE,2026,HSC,9.45,94.20,91.80,,0
+26CS110,Kavita Bhosale,kavita.b@dkte.ac.in,CSE,2026,DIPLOMA,8.60,84.00,,86.50,0

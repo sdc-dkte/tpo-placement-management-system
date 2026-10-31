@@ -24,3 +24,8 @@ logs/
 *.njsproj
 *.sln
 *.sw?
+
+# Local design prototypes & agent instructions (excluded from git tracking)
+GEMINI.md
+.gemini/
+frontend/stitch-designs/
