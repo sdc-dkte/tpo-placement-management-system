@@ -1,7 +1,12 @@
 const prisma = require("../prismaClient");
 const { checkStudentEligibility } = require("../services/eligibility.service");
+
+// V1 is a direct-selection workflow: the TPO verifies the outcome outside the portal and records it here.
+// Nothing in this file reads or writes DriveParticipation or PlacementStatusHistory.
+
 // Accept only real positive integers (number, or a string of digits). Number() alone lets [5], true, "1e1" and " 7 " through.
 const validId = value => (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
+
 // packageLPA must be a JSON number or a plain decimal string such as "12.5". Returns the number, or null when invalid.
 // Booleans, null, arrays, objects, "", "abc", "1e3", NaN and Infinity are rejected instead of being coerced by Number().
 // The project defines no maximum LPA, so the only rule is "finite and greater than zero".
@@ -10,84 +15,144 @@ const parsePackageLPA = value => {
   const parsed = typeof value === "number" ? value : /^\d+(\.\d+)?$/.test(text) ? Number(text) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
+
 const error = (res, status, code, message, details) => res.status(status).json({ success: false, error: { code, message, ...(details ? { details } : {}) }, message });
-const statuses = ["SELECTED", "OFFER_ACCEPTED", "OFFER_DECLINED"];
+const failWith = (code, extra) => Object.assign(new Error(code), { code, ...extra });
+
+const OFFER_STATUSES = ["SELECTED", "OFFER_ACCEPTED", "OFFER_DECLINED"];
+const NEXT_OFFER_STATUSES = { SELECTED: ["OFFER_ACCEPTED", "OFFER_DECLINED"], OFFER_ACCEPTED: [], OFFER_DECLINED: [] };
+
+const studentSummary = { id: true, PRN: true, graduationYear: true, user: { select: { name: true } }, department: { select: { id: true, name: true, code: true } } };
+
+const toSelectionSummary = selection => ({ selectionId: selection.id, studentId: selection.studentId, driveId: selection.driveId, status: selection.status, packageLPA: selection.packageLPA, selectedAt: selection.selectedAt });
 
 async function createSelection(req, res) {
   const studentId = validId(req.body?.studentId) ? Number(req.body.studentId) : NaN;
   const driveId = validId(req.body?.driveId) ? Number(req.body.driveId) : NaN;
-  const status = req.body?.status ?? "SELECTED";
   // Missing packageLPA falls back to the drive's package; an explicit null is invalid, not "missing".
   const requestedPackage = req.body?.packageLPA === undefined ? undefined : parsePackageLPA(req.body.packageLPA);
   if (!validId(studentId) || !validId(driveId)) return error(res, 400, "VALIDATION_ERROR", "studentId and driveId must be positive integers.");
-  if (status !== "SELECTED") return error(res, 422, "INVALID_SELECTION_STATUS", "A new official selection must start with SELECTED.");
   if (requestedPackage === null) return error(res, 400, "VALIDATION_ERROR", "packageLPA must be a positive number.", [{ field: "packageLPA", message: "Send a number greater than 0, for example 12.5." }]);
 
   try {
-    const [student, drive, participation, existing] = await Promise.all([
+    const [student, drive, existing] = await Promise.all([
       prisma.student.findUnique({ where: { id: studentId }, select: { id: true } }),
       prisma.placementDrive.findUnique({ where: { id: driveId }, include: { company: { select: { id: true, name: true, isActive: true } }, jobRole: { select: { id: true, title: true, companyId: true } } } }),
-      prisma.driveParticipation.findUnique({ where: { studentId_driveId: { studentId, driveId } } }),
-      prisma.studentSelection.findUnique({ where: { studentId }, select: { id: true, status: true, driveId: true } }),
+      prisma.studentSelection.findUnique({ where: { studentId }, select: { id: true } }),
     ]);
     if (!student) return error(res, 404, "STUDENT_NOT_FOUND", "Student not found.");
     if (!drive) return error(res, 404, "DRIVE_NOT_FOUND", "Placement drive not found.");
     if (existing) return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.", [{ field: "studentId", message: `Existing selectionId: ${existing.id}.` }]);
-    if (!participation) return error(res, 422, "PARTICIPATION_REQUIRED", "Student must have a participation record for this drive before selection.");
-    if (!["SHORTLISTED", "INTERVIEW_SCHEDULED"].includes(participation.processStatus)) return error(res, 422, "PARTICIPATION_STAGE_REQUIRED", "Only shortlisted or interview-scheduled participants can be selected.");
-    if (["CANCELLED", "COMPLETED"].includes(drive.status)) return error(res, 422, "DRIVE_CLOSED", "Cannot create a selection for a cancelled or completed drive.");
+    // Results are recorded after the recruitment process, so only a cancelled drive is an invalid target.
+    if (drive.status === "CANCELLED") return error(res, 422, "DRIVE_CLOSED", "Cannot create a selection for a cancelled drive.");
     if (!drive.company?.isActive) return error(res, 422, "COMPANY_INACTIVE", "The drive's company is inactive.");
     if (!drive.jobRole || drive.jobRole.companyId !== drive.companyId) return error(res, 422, "JOB_ROLE_COMPANY_MISMATCH", "The drive job role must belong to the same company as the drive.");
 
-    const eligibility = await checkStudentEligibility(studentId, driveId);
-    if (!eligibility.isEligible) return error(res, 422, "NOT_ELIGIBLE", "Student does not currently meet this drive's eligibility criteria.", eligibility.reasons.map(reason => ({ field: "eligibility", message: reason })));
-
     const packageLPA = requestedPackage === undefined ? drive.packageLPA : requestedPackage;
-    // Dashboards and reports average packageLPA, so an official selection must always carry one.
-    if (packageLPA == null) return error(res, 422, "PACKAGE_REQUIRED", "This drive has no package set. Provide packageLPA to record the selection.");
-    const data = await prisma.$transaction(async tx => {
-      // Recheck inside the transaction; the unique studentId constraint is the final concurrency guard.
-      const selection = await tx.studentSelection.findUnique({ where: { studentId }, select: { id: true } });
-      if (selection) { const conflict = new Error("OFFICIAL_SELECTION_EXISTS"); conflict.code = "OFFICIAL_SELECTION_EXISTS"; throw conflict; }
-      const currentParticipation = await tx.driveParticipation.findUnique({ where: { studentId_driveId: { studentId, driveId } } });
-      if (!currentParticipation || !["SHORTLISTED", "INTERVIEW_SCHEDULED"].includes(currentParticipation.processStatus)) {
-        const invalid = new Error("PARTICIPATION_STAGE_REQUIRED"); invalid.code = "PARTICIPATION_STAGE_REQUIRED"; throw invalid;
-      }
-      // Compare-and-set on the participation row. The WHERE matches the id AND the exact status read above, and the
-      // data never writes that status back, so a newer status set by another TPO can never be overwritten.
-      // PostgreSQL takes a row lock for the UPDATE: a concurrent status change waits for this transaction, and if it
-      // committed first the WHERE no longer matches (0 rows). The selection is created only after this succeeds.
-      const lockedParticipation = await tx.driveParticipation.updateMany({
-        where: { id: currentParticipation.id, processStatus: currentParticipation.processStatus },
-        data: { updatedAt: new Date() },
-      });
-      if (lockedParticipation.count !== 1) { const changed = new Error("PARTICIPATION_STATUS_CHANGED"); changed.code = "PARTICIPATION_STATUS_CHANGED"; throw changed; }
-      return tx.studentSelection.create({
-        data: { studentId, driveId, status: "SELECTED", packageLPA },
-        include: { student: { select: { id: true, PRN: true, user: { select: { name: true } }, department: { select: { id: true, name: true, code: true } } } }, drive: { include: { company: { select: { id: true, name: true } }, jobRole: { select: { id: true, title: true } } } } },
-      });
+    const created = await prisma.$transaction(async tx => {
+      // The unique studentId constraint is the final concurrency guard; this recheck only gives a clean message.
+      const duplicate = await tx.studentSelection.findUnique({ where: { studentId }, select: { id: true } });
+      if (duplicate) throw failWith("OFFICIAL_SELECTION_EXISTS");
+      // Eligibility is always recalculated from current student, academic and drive data, never from a stored flag.
+      const eligibility = await checkStudentEligibility(studentId, driveId, tx);
+      if (!eligibility.isEligible) throw failWith("NOT_ELIGIBLE", { reasons: eligibility.reasons });
+      return tx.studentSelection.create({ data: { studentId, driveId, status: "SELECTED", packageLPA } });
     });
-    return res.status(201).json({ success: true, data });
+    return res.status(201).json({ success: true, message: "Student selection recorded successfully", data: toSelectionSummary(created) });
   } catch (e) {
     if (e.code === "P2002" || e.code === "OFFICIAL_SELECTION_EXISTS") return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.");
-    if (e.code === "PARTICIPATION_STATUS_CHANGED") return error(res, 409, "CONCURRENT_UPDATE", "The participation status was changed by someone else. Reload and try again.");
-    if (e.code === "PARTICIPATION_STAGE_REQUIRED") return error(res, 422, "PARTICIPATION_STAGE_REQUIRED", "Student must be shortlisted or interview-scheduled before selection.");
+    if (e.code === "NOT_ELIGIBLE") return error(res, 422, "NOT_ELIGIBLE", "Student does not currently meet this drive's eligibility criteria.", e.reasons.map(reason => ({ field: "eligibility", message: reason })));
     if (e.code === "P2003" || e.code === "P2025") return error(res, 404, "RELATED_RECORD_NOT_FOUND", "Student or drive was not found.");
     console.error("createSelection:", e);
     return error(res, 500, "INTERNAL_ERROR", "Failed to record selection.");
   }
 }
 
+async function listSelections(req, res) {
+  try {
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 20);
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100) return error(res, 400, "VALIDATION_ERROR", "page must be positive and limit must be between 1 and 100.");
+
+    const where = {};
+    if (req.query.departmentId !== undefined) {
+      if (!validId(req.query.departmentId)) return error(res, 400, "VALIDATION_ERROR", "Invalid departmentId.");
+      where.student = { ...(where.student || {}), departmentId: Number(req.query.departmentId) };
+    }
+    if (req.query.graduationYear !== undefined) {
+      const year = Number(req.query.graduationYear);
+      if (!validId(req.query.graduationYear) || year < 1900 || year > 2200) return error(res, 400, "VALIDATION_ERROR", "Invalid graduationYear.");
+      where.student = { ...(where.student || {}), graduationYear: year };
+    }
+    if (req.query.companyId !== undefined) {
+      if (!validId(req.query.companyId)) return error(res, 400, "VALIDATION_ERROR", "Invalid companyId.");
+      where.drive = { ...(where.drive || {}), companyId: Number(req.query.companyId) };
+    }
+    if (req.query.driveId !== undefined) {
+      if (!validId(req.query.driveId)) return error(res, 400, "VALIDATION_ERROR", "Invalid driveId.");
+      where.driveId = Number(req.query.driveId);
+    }
+    if (req.query.status !== undefined) {
+      if (!OFFER_STATUSES.includes(req.query.status)) return error(res, 400, "VALIDATION_ERROR", "Invalid status.", [{ field: "status", message: `Allowed values: ${OFFER_STATUSES.join(", ")}.` }]);
+      where.status = req.query.status;
+    }
+    if (req.query.search !== undefined) {
+      if (typeof req.query.search !== "string") return error(res, 400, "VALIDATION_ERROR", "search must be a string.");
+      const term = req.query.search.trim();
+      if (term) where.OR = [
+        { student: { PRN: { contains: term, mode: "insensitive" } } },
+        { student: { user: { name: { contains: term, mode: "insensitive" } } } },
+        { drive: { company: { name: { contains: term, mode: "insensitive" } } } },
+        { drive: { jobRole: { title: { contains: term, mode: "insensitive" } } } },
+      ];
+    }
+
+    const sortBy = req.query.sortBy || "selectedAt";
+    const sortOrder = req.query.sortOrder || "desc";
+    const sortMap = {
+      selectedAt: { selectedAt: sortOrder }, packageLPA: { packageLPA: sortOrder }, status: { status: sortOrder },
+      department: { student: { department: { name: sortOrder } } }, graduationYear: { student: { graduationYear: sortOrder } },
+      academicYear: { student: { graduationYear: sortOrder } }, company: { drive: { company: { name: sortOrder } } }, studentName: { student: { user: { name: sortOrder } } },
+    };
+    if (!Object.prototype.hasOwnProperty.call(sortMap, sortBy) || !["asc", "desc"].includes(sortOrder)) return error(res, 400, "VALIDATION_ERROR", "Invalid sortBy or sortOrder.", [{ field: "sortBy", message: `Allowed values: ${Object.keys(sortMap).join(", ")}.` }]);
+
+    const [rows, total] = await Promise.all([
+      prisma.studentSelection.findMany({
+        where, skip: (page - 1) * limit, take: limit, orderBy: [sortMap[sortBy], { id: "desc" }],
+        include: { student: { select: studentSummary }, drive: { include: { company: { select: { id: true, name: true } }, jobRole: { select: { id: true, title: true } } } } },
+      }),
+      prisma.studentSelection.count({ where }),
+    ]);
+    const data = rows.map(s => ({
+      selectionId: s.id, studentId: s.studentId, driveId: s.driveId, PRN: s.student.PRN, studentName: s.student.user.name,
+      department: s.student.department, graduationYear: s.student.graduationYear,
+      company: s.drive.company.name, companyId: s.drive.company.id, jobRole: s.drive.jobRole?.title ?? null,
+      packageLPA: s.packageLPA, status: s.status, selectedAt: s.selectedAt,
+    }));
+    return res.json({ success: true, data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (e) { console.error("listSelections:", e); return error(res, 500, "INTERNAL_ERROR", "Failed to fetch selections."); }
+}
+
 async function getSelection(req, res) {
   try {
-    const id = Number(req.params.selectionId);
     if (!validId(req.params.selectionId)) return error(res, 400, "VALIDATION_ERROR", "Invalid selectionId.");
-    const data = await prisma.studentSelection.findUnique({ where: { id }, include: {
-      student: { select: { id: true, PRN: true, graduationYear: true, user: { select: { name: true } }, department: { select: { id: true, name: true, code: true } } } },
-      drive: { include: { company: { select: { id: true, name: true } }, jobRole: { select: { id: true, title: true, companyId: true } } } },
-    } });
-    if (!data) return error(res, 404, "SELECTION_NOT_FOUND", "Selection not found.");
-    return res.json({ success: true, data });
+    const s = await prisma.studentSelection.findUnique({
+      where: { id: Number(req.params.selectionId) },
+      include: {
+        student: { select: { ...studentSummary, user: { select: { name: true, email: true } } } },
+        drive: { include: { company: { select: { id: true, name: true, website: true } }, jobRole: { select: { id: true, title: true, description: true, domain: true } } } },
+      },
+    });
+    if (!s) return error(res, 404, "SELECTION_NOT_FOUND", "Selection not found.");
+    return res.json({
+      success: true,
+      data: {
+        selectionId: s.id, studentId: s.studentId, driveId: s.driveId, PRN: s.student.PRN, studentName: s.student.user.name, studentEmail: s.student.user.email,
+        department: s.student.department, graduationYear: s.student.graduationYear, company: s.drive.company, jobRole: s.drive.jobRole,
+        packageLPA: s.packageLPA, status: s.status, selectedAt: s.selectedAt,
+        drive: { id: s.drive.id, title: s.drive.title, driveDate: s.drive.driveDate, status: s.drive.status },
+      },
+    });
   } catch (e) { console.error("getSelection:", e); return error(res, 500, "INTERNAL_ERROR", "Failed to fetch selection."); }
 }
 
@@ -95,14 +160,13 @@ async function updateSelectionStatus(req, res) {
   try {
     const id = Number(req.params.selectionId);
     const status = req.body?.status;
-    if (!validId(req.params.selectionId) || !statuses.includes(status)) return error(res, 400, "VALIDATION_ERROR", "A valid selectionId and status are required.", [{ field: "status", message: `Allowed values: ${statuses.join(", ")}.` }]);
-    const allowedNext = { SELECTED: ["OFFER_ACCEPTED", "OFFER_DECLINED"], OFFER_ACCEPTED: [], OFFER_DECLINED: [] };
+    if (!validId(req.params.selectionId) || !OFFER_STATUSES.includes(status)) return error(res, 400, "VALIDATION_ERROR", "A valid selectionId and status are required.", [{ field: "status", message: `Allowed values: ${OFFER_STATUSES.join(", ")}.` }]);
     const result = await prisma.$transaction(async tx => {
       const current = await tx.studentSelection.findUnique({ where: { id } });
       if (!current) return { notFound: true };
       if (current.status === status) return { data: current };
-      if (!allowedNext[current.status]?.includes(status)) return { invalidTransition: true, currentStatus: current.status };
-      // Compare-and-set so accept/decline racing each other cannot both succeed.
+      if (!NEXT_OFFER_STATUSES[current.status]?.includes(status)) return { invalidTransition: true, currentStatus: current.status };
+      // Compare-and-set so accept/decline racing each other cannot both succeed. The selection is never deleted.
       const swapped = await tx.studentSelection.updateMany({ where: { id, status: current.status }, data: { status } });
       if (swapped.count === 0) return { conflict: true };
       return { data: await tx.studentSelection.findUnique({ where: { id } }) };
@@ -110,8 +174,28 @@ async function updateSelectionStatus(req, res) {
     if (result.notFound) return error(res, 404, "SELECTION_NOT_FOUND", "Selection not found.");
     if (result.invalidTransition) return error(res, 422, "INVALID_STATUS_TRANSITION", `Cannot change selection status from ${result.currentStatus} to ${status}.`);
     if (result.conflict) return error(res, 409, "CONCURRENT_UPDATE", "The offer status was changed by someone else. Reload and try again.");
-    return res.json({ success: true, data: result.data });
+    return res.json({ success: true, message: "Offer status updated successfully", data: toSelectionSummary(result.data) });
   } catch (e) { console.error("updateSelectionStatus:", e); return error(res, 500, "INTERNAL_ERROR", "Failed to update offer status."); }
 }
 
-module.exports = { createSelection, getSelection, updateSelectionStatus };
+async function getMySelection(req, res) {
+  try {
+    // The student is resolved from the verified JWT user; no studentId is read from the client.
+    const student = await prisma.student.findUnique({ where: { userId: req.user.id }, select: { id: true } });
+    if (!student) return error(res, 404, "STUDENT_NOT_FOUND", "Student profile not found.");
+    const s = await prisma.studentSelection.findUnique({
+      where: { studentId: student.id },
+      include: { drive: { include: { company: { select: { id: true, name: true, website: true } }, jobRole: { select: { id: true, title: true, domain: true } } } } },
+    });
+    if (!s) return res.json({ success: true, data: null, message: "No official selection record found" });
+    return res.json({
+      success: true,
+      data: {
+        selectionId: s.id, studentId: s.studentId, driveId: s.driveId, status: s.status, packageLPA: s.packageLPA, selectedAt: s.selectedAt,
+        company: s.drive.company, jobRole: s.drive.jobRole, drive: { id: s.drive.id, title: s.drive.title, driveDate: s.drive.driveDate },
+      },
+    });
+  } catch (e) { console.error("getMySelection:", e); return error(res, 500, "INTERNAL_ERROR", "Failed to fetch selection."); }
+}
+
+module.exports = { createSelection, listSelections, getSelection, updateSelectionStatus, getMySelection };
