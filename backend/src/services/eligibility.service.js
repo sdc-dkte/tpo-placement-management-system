@@ -22,6 +22,13 @@ const evaluateStudentEligibility = (
     eligibleBranchIds = [],
     eligibleYears = []
 ) => {
+    if (!student || typeof student !== "object") {
+        return {
+            isEligible: false,
+            reasons: ["Student record is missing or invalid."],
+        };
+    }
+
     const reasons = [];
 
     // 1. Department / Branch Check
@@ -207,7 +214,7 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
     const where = {};
 
 
-    if (departmentId !== undefined) {
+    if (departmentId !== undefined && departmentId !== null && String(departmentId).trim() !== "") {
         const id = Number(departmentId);
 
         if (!Number.isInteger(id) || id <= 0) {
@@ -219,7 +226,7 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         where.departmentId = id;
     }
 
-    if (graduationYear !== undefined) {
+    if (graduationYear !== undefined && graduationYear !== null && String(graduationYear).trim() !== "") {
         const year = Number(graduationYear);
 
         if (!Number.isInteger(year) || year < 2000 || year > 2100) {
@@ -310,22 +317,21 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         !Number.isInteger(pageNum) ||
         pageNum < 1 ||
         !Number.isInteger(limitNum) ||
-        limitNum < 1
+        limitNum < 1 ||
+        limitNum > 100
     ) {
-        const error = new Error("Invalid pagination parameters.");
+        const error = new Error("Invalid pagination parameters. Limit must be between 1 and 100.");
         error.statusCode = 400;
         throw error;
     }
 
-    const safeLimit = Math.min(limitNum, 100);
-
     const total = filteredList.length;
-    const totalPages = Math.ceil(total / safeLimit);
-    const startIndex = (pageNum - 1) * safeLimit;
+    const totalPages = Math.ceil(total / limitNum);
+    const startIndex = (pageNum - 1) * limitNum;
 
     const paginatedList = filteredList.slice(
         startIndex,
-        startIndex + safeLimit
+        startIndex + limitNum
     );
 
     return {

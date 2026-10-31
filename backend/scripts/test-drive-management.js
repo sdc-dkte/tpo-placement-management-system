@@ -12,7 +12,7 @@ async function runTests() {
     } catch (e) {
         console.log("Database connection could not be established:", e.message);
         console.log("Testing pure logic functions:");
-        testPureEligibilityEngine();
+        await testPureEligibilityEngine();
         return;
     }
 
@@ -303,8 +303,8 @@ async function runTests() {
     }
 }
 
-function testPureEligibilityEngine() {
-    console.log("--- Running Pure Logic Tests for evaluateStudentEligibility ---");
+async function testPureEligibilityEngine() {
+    console.log("--- Running Pure Logic & Input Validation Tests ---");
     const criteria = {
         minimumCGPA: 7.0,
         minimumTenth: 60.0,
@@ -364,6 +364,93 @@ function testPureEligibilityEngine() {
     const res5 = eligibilityService.evaluateStudentEligibility(student5, criteria, eligibleBranchIds, eligibleYears);
     console.assert(res5.isEligible === true, "Case 5 should be eligible");
     console.log("✔ Pure Test Case 5 (Diploma student eligible): PASS");
+
+    // Case 6: Defensive guard on null/undefined student
+    const res6 = eligibilityService.evaluateStudentEligibility(null, criteria, eligibleBranchIds, eligibleYears);
+    console.assert(res6.isEligible === false && res6.reasons.length > 0, "Null student must be handled safely");
+    console.log("✔ Pure Test Case 6 (Null student defensive guard): PASS");
+
+    // Case 7: checkStudentDriveEligibility ID validation
+    const res7a = await eligibilityService.checkStudentDriveEligibility("abc", 1);
+    console.assert(res7a.error === true, "Invalid studentId must return error: true");
+    const res7b = await eligibilityService.checkStudentDriveEligibility(1, -5);
+    console.assert(res7b.error === true, "Negative driveId must return error: true");
+    console.log("✔ Pure Test Case 7 (Student drive eligibility ID validation): PASS");
+
+    // Case 8: createPlacementDrive input validation
+    let errCount = 0;
+    try {
+        await driveService.createPlacementDrive(null);
+    } catch (e) {
+        if (e.statusCode === 400) errCount++;
+    }
+    try {
+        await driveService.createPlacementDrive({ companyId: "xyz" });
+    } catch (e) {
+        if (e.statusCode === 400) errCount++;
+    }
+    try {
+        await driveService.createPlacementDrive({ companyId: 1, jobRoleId: -1 });
+    } catch (e) {
+        if (e.statusCode === 400) errCount++;
+    }
+    try {
+        await driveService.createPlacementDrive({ companyId: 1, jobRoleId: 1, title: "   ", packageLPA: 5 });
+    } catch (e) {
+        if (e.statusCode === 400) errCount++;
+    }
+    try {
+        await driveService.createPlacementDrive({ companyId: 1, jobRoleId: 1, title: "Valid", packageLPA: -5 });
+    } catch (e) {
+        if (e.statusCode === 400) errCount++;
+    }
+    console.assert(errCount === 5, `Expected 5 validation rejections, got ${errCount}`);
+    console.log("✔ Pure Test Case 8 (createPlacementDrive payload validation): PASS");
+
+    // Case 9: updatePlacementDrive ID & field validation
+    let updateErrCount = 0;
+    try {
+        await driveService.updatePlacementDrive("not-a-number", {});
+    } catch (e) {
+        if (e.statusCode === 400) updateErrCount++;
+    }
+    try {
+        await driveService.updatePlacementDrive(0, {});
+    } catch (e) {
+        if (e.statusCode === 400) updateErrCount++;
+    }
+    try {
+        await driveService.updatePlacementDrive(1, null);
+    } catch (e) {
+        if (e.statusCode === 400) updateErrCount++;
+    }
+    console.assert(updateErrCount === 3, `Expected 3 update validation rejections, got ${updateErrCount}`);
+    console.log("✔ Pure Test Case 9 (updatePlacementDrive ID validation): PASS");
+
+    // Case 10: updatePlacementDriveStatus validation
+    let statusErrCount = 0;
+    try {
+        await driveService.updatePlacementDriveStatus("invalid-id", "ONGOING");
+    } catch (e) {
+        if (e.statusCode === 400) statusErrCount++;
+    }
+    try {
+        await driveService.updatePlacementDriveStatus(1, "");
+    } catch (e) {
+        if (e.statusCode === 400) statusErrCount++;
+    }
+    console.assert(statusErrCount === 2, `Expected 2 status validation rejections, got ${statusErrCount}`);
+    console.log("✔ Pure Test Case 10 (updatePlacementDriveStatus validation): PASS");
+
+    // Case 11: replaceEligibilityCriteria validation
+    let criteriaErrCount = 0;
+    try {
+        await driveService.replaceEligibilityCriteria("bad-id", {});
+    } catch (e) {
+        if (e.statusCode === 400) criteriaErrCount++;
+    }
+    console.assert(criteriaErrCount === 1, `Expected 1 criteria validation rejection, got ${criteriaErrCount}`);
+    console.log("✔ Pure Test Case 11 (replaceEligibilityCriteria ID validation): PASS");
 }
 
 runTests();
