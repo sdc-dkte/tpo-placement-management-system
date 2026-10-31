@@ -8,9 +8,16 @@ const eligibilityService = require("../services/eligibility.service");
  */
 const createDrive = async (req, res) => {
     try {
+        if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+            return res.status(400).json({
+                success: false,
+                message: "Request body must be a valid JSON object.",
+            });
+        }
+
         const { companyId, jobRoleId, title, packageLPA } = req.body;
 
-        if (!companyId || !jobRoleId || !title || packageLPA === undefined) {
+        if (!companyId || !jobRoleId || typeof title !== "string" || !title.trim() || packageLPA === undefined) {
             return res.status(400).json({
                 success: false,
                 message: "Missing required fields: companyId, jobRoleId, title, and packageLPA are compulsory.",
@@ -75,6 +82,11 @@ const getDriveById = async (req, res) => {
 
         // If a student is requesting, evaluate their personal eligibility
         if (req.user && req.user.role === "STUDENT") {
+            if (drive.counts) {
+                const { campaigns, ...studentCounts } = drive.counts;
+                drive.counts = studentCounts;
+            }
+
             const student = await prisma.student.findUnique({
                 where: { userId: req.user.id },
                 select: { id: true },
@@ -280,6 +292,13 @@ const getMyEligibility = async (req, res) => {
             student.id,
             driveId
         );
+
+        if (result.error) {
+            return res.status(400).json({
+                success: false,
+                message: result.message,
+            });
+        }
 
         if (result.notFound) {
             return res.status(404).json({

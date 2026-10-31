@@ -28,7 +28,7 @@ router.post("/", authenticateToken, allowRoles("TPO"), createDrive);
 
 // 3. Current student's drive eligibility check (Student only)
 router.get(
-    "/:driveId/eligibility/me",
+    ["/:driveId/eligibility/me", "/:driveId/eligibility"],
     authenticateToken,
     allowRoles("STUDENT"),
     getMyEligibility
