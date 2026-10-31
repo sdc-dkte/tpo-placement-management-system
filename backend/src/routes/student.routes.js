@@ -2,32 +2,44 @@ const express = require("express");
 const router = express.Router();
 
 const {
-    createStudent,
     getStudents,
     getStudentById,
     getMyProfile,
-    getMyDrives,
-    getMyPlacements,
-    updateStudent,
-    updateStudentAccountStatus,
+    getMyDrives
 } = require("../controllers/student.controller");
+const { getMySelection } = require("../controllers/selection.controller");
 
 const authenticate = require("../middleware/auth.middleware");
 const authorizeRole = require("../middleware/role.middleware");
 
-// Require authentication for all student routes.
-router.use(authenticate);
+// Register /me before /:studentId to avoid route conflicts.
+router.get(
+    "/me",
+    authenticate,
+    authorizeRole("STUDENT"),
+    getMyProfile
+);
 
-// Student-only routes: register before /:studentId.
-router.get("/me", authorizeRole("STUDENT"), getMyProfile);
-router.get("/me/drives", authorizeRole("STUDENT"), getMyDrives);
-router.get("/me/placements", authorizeRole("STUDENT"), getMyPlacements);
+router.get("/", authenticate, authorizeRole("TPO"), getStudents);
+router.get("/:studentId", authenticate, authorizeRole("TPO"), getStudentById);
 
-// TPO-only routes.
-router.post("/", authorizeRole("TPO"), createStudent);
-router.get("/", authorizeRole("TPO"), getStudents);
-router.get("/:studentId", authorizeRole("TPO"), getStudentById);
-router.patch("/:studentId", authorizeRole("TPO"), updateStudent);
-router.patch("/:id/status", authorizeRole("TPO"), updateStudentAccountStatus);
+router.get(
+    "/me/drives",
+    authenticate,
+    authorizeRole("STUDENT"),
+    getMyDrives
+);
+
+
+
+router.get(
+    "/me/selection",
+    authenticate,
+    authorizeRole("STUDENT"),
+    getMySelection
+);
+
+
+
 
 module.exports = router;
