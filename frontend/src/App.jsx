@@ -6,6 +6,7 @@ import LoginPage from './pages/auth/LoginPage';
 import TpoLayout from './pages/tpo/TpoLayout';
 import TpoDashboardPage from './pages/tpo/TpoDashboardPage';
 import TpoDrivesPage from './pages/tpo/TpoDrivesPage';
+import TpoDriveDetailPage from './pages/tpo/drives/TpoDriveDetailPage';
 import TpoCompaniesPage from './pages/tpo/TpoCompaniesPage';
 import StudentDirectoryPage from './pages/tpo/student-directory/StudentDirectoryPage';
 import TpoAnalyticsPage from './pages/tpo/TpoAnalyticsPage';
@@ -41,6 +42,7 @@ export default function App() {
               <Route element={<TpoLayout />}>
                 <Route path="/dashboard" element={<TpoDashboardPage />} />
                 <Route path="/drives" element={<TpoDrivesPage />} />
+                <Route path="/drives/:driveId" element={<TpoDriveDetailPage />} />
                 <Route path="/companies" element={<TpoCompaniesPage />} />
                 <Route path="/students" element={<StudentDirectoryPage />} />
                 <Route path="/analytics" element={<TpoAnalyticsPage />} />
