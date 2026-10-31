@@ -1,13 +1,177 @@
 
 const prisma = require("../prismaClient");
 
-// A null threshold means no restriction.
+// A null or undefined threshold means no restriction.
 const hasLimit = (value) => value !== null && value !== undefined;
 
-const belowMinimum = (actual, minimum) =>
-    hasLimit(minimum) && (actual == null || Number(actual) < Number(minimum));
+const isValidNumber = (value, min, max) => {
+    if (
+        value === null ||
+        value === undefined ||
+        typeof value === "boolean"
+    ) {
+        return false;
+    }
 
-/** Recalculate eligibility from live academic, drive, and placement records. */
+    const number = Number(value);
+
+    return Number.isFinite(number) && number >= min && number <= max;
+};
+
+/**
+ * Evaluates whether a student meets the criteria for a placement drive.
+ * This function is shared by all eligibility endpoints to keep results consistent.
+ */
+const evaluateStudentEligibility = (
+    student,
+    criteria,
+    eligibleBranchIds = [],
+    eligibleYears = [],
+    drive = null
+) => {
+    const reasons = [];
+
+    // Missing criteria must never result in automatic eligibility.
+    if (!criteria) {
+        reasons.push("ELIGIBILITY_CRITERIA_NOT_CONFIGURED");
+
+        return {
+            isEligible: false,
+            reasons,
+        };
+    }
+
+    // 1. Company and job-role validation.
+    if (drive) {
+        if (drive.company && !drive.company.isActive) {
+            reasons.push("COMPANY_INACTIVE");
+        }
+
+        if (
+            drive.jobRole &&
+            drive.jobRole.companyId !== drive.companyId
+        ) {
+            reasons.push("JOB_ROLE_COMPANY_MISMATCH");
+        }
+    }
+
+    // 2. Department validation.
+    if (
+        eligibleBranchIds.length > 0 &&
+        !eligibleBranchIds.includes(student.departmentId)
+    ) {
+        reasons.push("DEPARTMENT_NOT_ELIGIBLE");
+    }
+
+    // 3. Graduation year validation.
+    if (
+        eligibleYears.length > 0 &&
+        !eligibleYears.includes(student.graduationYear)
+    ) {
+        reasons.push("GRADUATION_YEAR_NOT_ELIGIBLE");
+    }
+
+    // 4. CGPA validation.
+    const minimumCGPA = Number(criteria.minimumCGPA ?? 0);
+
+    if (!isValidNumber(student.CGPA, 0, 10)) {
+        reasons.push("CGPA_MISSING_OR_INVALID");
+    } else if (
+        !Number.isFinite(minimumCGPA) ||
+        minimumCGPA < 0 ||
+        minimumCGPA > 10
+    ) {
+        reasons.push("INVALID_CGPA_CRITERIA");
+    } else if (Number(student.CGPA) < minimumCGPA) {
+        reasons.push("MINIMUM_CGPA_NOT_MET");
+    }
+
+    // 5. 10th percentage validation.
+    const minimumTenth = Number(criteria.minimumTenth ?? 0);
+
+    if (!isValidNumber(student.tenthPercentage, 0, 100)) {
+        reasons.push("TENTH_PERCENTAGE_MISSING_OR_INVALID");
+    } else if (
+        !Number.isFinite(minimumTenth) ||
+        minimumTenth < 0 ||
+        minimumTenth > 100
+    ) {
+        reasons.push("INVALID_TENTH_CRITERIA");
+    } else if (Number(student.tenthPercentage) < minimumTenth) {
+        reasons.push("MINIMUM_TENTH_PERCENTAGE_NOT_MET");
+    }
+
+    // 6. Academic pathway validation.
+    if (!["HSC", "DIPLOMA"].includes(student.academicPathway)) {
+        reasons.push("ACADEMIC_PATHWAY_MISSING_OR_INVALID");
+    }
+
+    // 7. 12th percentage validation for HSC students.
+    if (student.academicPathway === "HSC") {
+        const minimum = criteria.minimumTwelfth;
+
+        if (hasLimit(minimum) && Number(minimum) > 0) {
+            if (!isValidNumber(student.twelfthPercentage, 0, 100)) {
+                reasons.push("TWELFTH_PERCENTAGE_MISSING_OR_INVALID");
+            } else if (
+                !isValidNumber(minimum, 0, 100)
+            ) {
+                reasons.push("INVALID_TWELFTH_CRITERIA");
+            } else if (Number(student.twelfthPercentage) < Number(minimum)) {
+                reasons.push("MINIMUM_TWELFTH_PERCENTAGE_NOT_MET");
+            }
+        }
+    }
+
+    // 8. Diploma percentage validation for Diploma students.
+    if (student.academicPathway === "DIPLOMA") {
+        const minimum = criteria.minimumDiplomaPercentage;
+
+        if (hasLimit(minimum) && Number(minimum) > 0) {
+            if (!isValidNumber(student.diplomaPercentage, 0, 100)) {
+                reasons.push("DIPLOMA_PERCENTAGE_MISSING_OR_INVALID");
+            } else if (!isValidNumber(minimum, 0, 100)) {
+                reasons.push("INVALID_DIPLOMA_CRITERIA");
+            } else if (
+                Number(student.diplomaPercentage) < Number(minimum)
+            ) {
+                reasons.push("MINIMUM_DIPLOMA_PERCENTAGE_NOT_MET");
+            }
+        }
+    }
+
+    // 9. Active backlogs validation.
+    // If maximumBacklogs is null, there is no backlog restriction.
+    if (hasLimit(criteria.maximumBacklogs)) {
+        if (
+            !Number.isInteger(student.activeBacklogs) ||
+            student.activeBacklogs < 0
+        ) {
+            reasons.push("ACTIVE_BACKLOGS_MISSING_OR_INVALID");
+        } else if (
+            student.activeBacklogs > criteria.maximumBacklogs
+        ) {
+            reasons.push("MAXIMUM_BACKLOGS_EXCEEDED");
+        }
+    }
+
+    // 10. Previous official placement validation.
+    if (
+        criteria.allowPreviousPlacement === false &&
+        student.selection
+    ) {
+        reasons.push("PREVIOUS_PLACEMENT_NOT_ALLOWED");
+    }
+
+    return {
+        isEligible: reasons.length === 0,
+        reasons,
+    };
+};
+
+/**
+ * Recalculate eligibility using live academic, drive and placement records.
+ */
 async function checkStudentEligibility(studentId, driveId, db = prisma) {
     const [student, drive] = await Promise.all([
         db.student.findUnique({
@@ -22,17 +186,31 @@ async function checkStudentEligibility(studentId, driveId, db = prisma) {
                 twelfthPercentage: true,
                 diplomaPercentage: true,
                 activeBacklogs: true,
-                selection: { select: { id: true, status: true } },
+                selection: {
+                    select: {
+                        id: true,
+                        status: true,
+                    },
+                },
             },
         }),
+
         db.placementDrive.findUnique({
             where: { id: driveId },
             include: {
                 eligibilityCriteria: true,
-                eligibleBranches: { select: { departmentId: true } },
-                eligibleYears: { select: { graduationYear: true } },
-                company: { select: { isActive: true } },
-                jobRole: { select: { companyId: true } },
+                eligibleBranches: {
+                    select: { departmentId: true },
+                },
+                eligibleYears: {
+                    select: { graduationYear: true },
+                },
+                company: {
+                    select: { isActive: true },
+                },
+                jobRole: {
+                    select: { companyId: true },
+                },
             },
         }),
     ]);
@@ -56,171 +234,35 @@ async function checkStudentEligibility(studentId, driveId, db = prisma) {
         };
     }
 
-    const reasons = [];
-    const criteria = drive.eligibilityCriteria;
+    const eligibleBranchIds = drive.eligibleBranches.map(
+        (branch) => branch.departmentId
+    );
 
-    if (!criteria) {
-        reasons.push("ELIGIBILITY_CRITERIA_NOT_CONFIGURED");
-    } else {
-        if (belowMinimum(student.CGPA, criteria.minimumCGPA)) {
-            reasons.push("MINIMUM_CGPA_NOT_MET");
-        }
+    const eligibleYears = drive.eligibleYears.map(
+        (year) => year.graduationYear
+    );
 
-        if (belowMinimum(student.tenthPercentage, criteria.minimumTenth)) {
-            reasons.push("MINIMUM_TENTH_PERCENTAGE_NOT_MET");
-        }
-
-        if (
-            student.academicPathway === "HSC" &&
-            belowMinimum(student.twelfthPercentage, criteria.minimumTwelfth)
-        ) {
-            reasons.push("MINIMUM_TWELFTH_PERCENTAGE_NOT_MET");
-        }
-
-        if (
-            student.academicPathway === "DIPLOMA" &&
-            belowMinimum(
-                student.diplomaPercentage,
-                criteria.minimumDiplomaPercentage
-            )
-        ) {
-            reasons.push("MINIMUM_DIPLOMA_PERCENTAGE_NOT_MET");
-        }
-
-        if (
-            hasLimit(criteria.maximumBacklogs) &&
-            (student.activeBacklogs ?? 0) > criteria.maximumBacklogs
-        ) {
-            reasons.push("MAXIMUM_BACKLOGS_EXCEEDED");
-        }
-
-        if (student.selection && !criteria.allowPreviousPlacement) {
-            reasons.push("PREVIOUS_PLACEMENT_NOT_ALLOWED");
-        }
-    }
-
-    if (!drive.company?.isActive) {
-        reasons.push("COMPANY_INACTIVE");
-    }
-
-    if (drive.jobRole && drive.jobRole.companyId !== drive.companyId) {
-        reasons.push("JOB_ROLE_COMPANY_MISMATCH");
-    }
-
-    if (
-        drive.eligibleBranches.length &&
-        !drive.eligibleBranches.some(
-            (branch) => branch.departmentId === student.departmentId
-        )
-    ) {
-        reasons.push("DEPARTMENT_NOT_ELIGIBLE");
-    }
-
-    if (
-        drive.eligibleYears.length &&
-        !drive.eligibleYears.some(
-            (year) => year.graduationYear === student.graduationYear
-        )
-    ) {
-        reasons.push("GRADUATION_YEAR_NOT_ELIGIBLE");
-    }
+    const evaluation = evaluateStudentEligibility(
+        student,
+        drive.eligibilityCriteria,
+        eligibleBranchIds,
+        eligibleYears,
+        drive
+    );
 
     return {
         exists: true,
         driveExists: true,
-        isEligible: reasons.length === 0,
-        reasons,
+        isEligible: evaluation.isEligible,
+        reasons: evaluation.reasons,
         student,
         drive,
     };
 }
 
 /**
- * Evaluates whether a student meets the criteria for a placement drive.
- */
-const evaluateStudentEligibility = (
-    student,
-    criteria,
-    eligibleBranchIds = [],
-    eligibleYears = []
-) => {
-    const reasons = [];
-
-    // Missing criteria must never result in automatic eligibility.
-    if (!criteria) {
-        return {
-            isEligible: false,
-            reasons: ["ELIGIBILITY_CRITERIA_NOT_CONFIGURED"],
-        };
-    }
-
-    // 1. Department / Branch Check
-    if (
-        eligibleBranchIds.length > 0 &&
-        !eligibleBranchIds.includes(student.departmentId)
-    ) {
-        reasons.push("DEPARTMENT_NOT_ELIGIBLE");
-    }
-
-    // 2. Graduation Year Check
-    if (
-        eligibleYears.length > 0 &&
-        !eligibleYears.includes(student.graduationYear)
-    ) {
-        reasons.push("GRADUATION_YEAR_NOT_ELIGIBLE");
-    }
-
-    // 3. Minimum CGPA Check
-    if (belowMinimum(student.CGPA, criteria.minimumCGPA)) {
-        reasons.push("MINIMUM_CGPA_NOT_MET");
-    }
-
-    // 4. Minimum 10th Percentage Check
-    if (belowMinimum(student.tenthPercentage, criteria.minimumTenth)) {
-        reasons.push("MINIMUM_TENTH_PERCENTAGE_NOT_MET");
-    }
-
-    // 5. Pathway-specific academic checks
-    if (
-        student.academicPathway === "HSC" &&
-        belowMinimum(student.twelfthPercentage, criteria.minimumTwelfth)
-    ) {
-        reasons.push("MINIMUM_TWELFTH_PERCENTAGE_NOT_MET");
-    }
-
-    if (
-        student.academicPathway === "DIPLOMA" &&
-        belowMinimum(
-            student.diplomaPercentage,
-            criteria.minimumDiplomaPercentage
-        )
-    ) {
-        reasons.push("MINIMUM_DIPLOMA_PERCENTAGE_NOT_MET");
-    }
-
-    // 6. Active Backlogs Check
-    // Null maximumBacklogs means no restriction.
-    if (
-        hasLimit(criteria.maximumBacklogs) &&
-        (student.activeBacklogs ?? 0) > criteria.maximumBacklogs
-    ) {
-        reasons.push("MAXIMUM_BACKLOGS_EXCEEDED");
-    }
-
-    // 7. Previous Official Placement Check
-    if (criteria.allowPreviousPlacement === false && student.selection) {
-        reasons.push("PREVIOUS_PLACEMENT_NOT_ALLOWED");
-    }
-
-    return {
-        isEligible: reasons.length === 0,
-        reasons,
-    };
-};
-
-/**
  * Calculates eligible students for a specific placement drive.
- * Supports filtering, searching, and pagination.
+ * Supports filtering, searching and pagination.
  */
 const getEligibleStudentsForDrive = async (driveId, options = {}) => {
     const {
@@ -232,16 +274,134 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         statusFilter = "eligible_only",
     } = options;
 
+    // Validate status filter.
+    const allowedStatusFilters = [
+        "eligible_only",
+        "ineligible_only",
+        "all",
+    ];
+
+    if (!allowedStatusFilters.includes(statusFilter)) {
+        const error = new Error("Invalid statusFilter.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    // Validate drive ID.
+    const driveIdNum = Number(driveId);
+
+    if (!Number.isInteger(driveIdNum) || driveIdNum <= 0) {
+        const error = new Error("Invalid driveId.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    // Validate pagination.
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+
+    if (
+        !Number.isInteger(pageNum) ||
+        pageNum < 1 ||
+        !Number.isInteger(limitNum) ||
+        limitNum < 1
+    ) {
+        const error = new Error("Invalid pagination parameters.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const safeLimit = Math.min(limitNum, 100);
+
+    // Validate optional filters.
+    const where = {};
+
+    if (departmentId !== undefined) {
+        const id = Number(departmentId);
+
+        if (!Number.isInteger(id) || id <= 0) {
+            const error = new Error("Invalid departmentId.");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        where.departmentId = id;
+    }
+
+    if (graduationYear !== undefined) {
+        const year = Number(graduationYear);
+
+        if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+            const error = new Error("Invalid graduationYear.");
+            error.statusCode = 400;
+            throw error;
+        }
+
+        where.graduationYear = year;
+    }
+
+    if (typeof search !== "string") {
+        const error = new Error("Invalid search parameter.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (search.trim() !== "") {
+        const searchTerm = search.trim();
+
+        where.OR = [
+            {
+                PRN: {
+                    contains: searchTerm,
+                    mode: "insensitive",
+                },
+            },
+            {
+                user: {
+                    name: {
+                        contains: searchTerm,
+                        mode: "insensitive",
+                    },
+                },
+            },
+            {
+                user: {
+                    email: {
+                        contains: searchTerm,
+                        mode: "insensitive",
+                    },
+                },
+            },
+        ];
+    }
+
+    // Fetch drive details and eligibility configuration.
     const drive = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
+        where: { id: driveIdNum },
         include: {
-            company: { select: { id: true, name: true, isActive: true } },
-            jobRole: { select: { id: true, title: true, companyId: true } },
+            company: {
+                select: {
+                    id: true,
+                    name: true,
+                    isActive: true,
+                },
+            },
+            jobRole: {
+                select: {
+                    id: true,
+                    title: true,
+                    companyId: true,
+                },
+            },
             eligibilityCriteria: true,
             eligibleBranches: {
                 include: {
                     department: {
-                        select: { id: true, name: true, code: true },
+                        select: {
+                            id: true,
+                            name: true,
+                            code: true,
+                        },
                     },
                 },
             },
@@ -263,45 +423,47 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
 
     const criteria = drive.eligibilityCriteria;
 
-    // Build Prisma where clause.
-    const where = {};
-
-    if (departmentId) {
-        where.departmentId = Number(departmentId);
-    }
-
-    if (graduationYear) {
-        where.graduationYear = Number(graduationYear);
-    }
-
-    if (search && search.trim() !== "") {
-        const searchTerm = search.trim();
-
-        where.OR = [
-            { PRN: { contains: searchTerm, mode: "insensitive" } },
-            { user: { name: { contains: searchTerm, mode: "insensitive" } } },
-            { user: { email: { contains: searchTerm, mode: "insensitive" } } },
-        ];
-    }
-
+    // Fetch candidate records.
     const candidates = await prisma.student.findMany({
         where,
         include: {
-            user: { select: { id: true, name: true, email: true } },
-            department: { select: { id: true, name: true, code: true } },
+            user: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                },
+            },
+            department: {
+                select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                },
+            },
             selection: {
-                select: { id: true, driveId: true, status: true, packageLPA: true },
+                select: {
+                    id: true,
+                    driveId: true,
+                    status: true,
+                    packageLPA: true,
+                },
             },
         },
-        orderBy: [{ CGPA: "desc" }, { PRN: "asc" }],
+        orderBy: [
+            { CGPA: "desc" },
+            { PRN: "asc" },
+        ],
     });
 
+    // Evaluate every candidate using the shared evaluator.
     const evaluated = candidates.map((student) => {
         const evaluation = evaluateStudentEligibility(
             student,
             criteria,
             eligibleBranchIds,
-            eligibleYears
+            eligibleYears,
+            drive
         );
 
         return {
@@ -332,35 +494,39 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
 
     const ineligibleCount = evaluated.length - eligibleCount;
 
+    // Apply eligibility status filter.
     let filteredList = evaluated;
 
     if (statusFilter === "eligible_only") {
-        filteredList = evaluated.filter((student) => student.isEligible);
+        filteredList = evaluated.filter(
+            (student) => student.isEligible
+        );
     } else if (statusFilter === "ineligible_only") {
-        filteredList = evaluated.filter((student) => !student.isEligible);
+        filteredList = evaluated.filter(
+            (student) => !student.isEligible
+        );
     }
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
-
+    // Apply pagination.
     const total = filteredList.length;
-    const totalPages = Math.ceil(total / limitNum) || 1;
-    const startIndex = (pageNum - 1) * limitNum;
+    const totalPages = Math.ceil(total / safeLimit) || 1;
+    const startIndex = (pageNum - 1) * safeLimit;
 
     const paginatedList = filteredList.slice(
         startIndex,
-        startIndex + limitNum
+        startIndex + safeLimit
     );
 
     return {
         drive: {
             id: drive.id,
             title: drive.title,
-            companyName: drive.company.name,
-            jobRoleTitle: drive.jobRole.title,
+            companyName: drive.company?.name || "",
+            jobRoleTitle: drive.jobRole?.title || "",
             status: drive.status,
             packageLPA: drive.packageLPA,
         },
+
         criteria: {
             minimumCGPA: criteria?.minimumCGPA ?? 0,
             minimumTenth: criteria?.minimumTenth ?? 0,
@@ -368,39 +534,70 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
             minimumDiplomaPercentage:
                 criteria?.minimumDiplomaPercentage ?? null,
             maximumBacklogs: criteria?.maximumBacklogs ?? null,
-            allowPreviousPlacement: criteria?.allowPreviousPlacement ?? false,
+            allowPreviousPlacement:
+                criteria?.allowPreviousPlacement ?? false,
+
             eligibleDepartments: drive.eligibleBranches.map((branch) => ({
                 id: branch.department.id,
                 name: branch.department.name,
                 code: branch.department.code,
             })),
+
             eligibleGraduationYears: eligibleYears,
         },
+
         summary: {
             totalEvaluated: evaluated.length,
             eligibleCount,
             ineligibleCount,
         },
+
         pagination: {
             page: pageNum,
-            limit: limitNum,
+            limit: safeLimit,
             total,
             totalPages,
         },
+
         data: paginatedList,
     };
 };
 
 /**
- * Checks single student eligibility for a drive.
+ * Checks eligibility for a student using Student ID and Drive ID.
  */
 const checkStudentDriveEligibility = async (studentId, driveId) => {
+    const studentIdNum = Number(studentId);
+    const driveIdNum = Number(driveId);
+
+    if (
+        !Number.isInteger(studentIdNum) ||
+        studentIdNum <= 0 ||
+        !Number.isInteger(driveIdNum) ||
+        driveIdNum <= 0
+    ) {
+        return {
+            error: true,
+            message: "Invalid student ID or drive ID.",
+        };
+    }
+
     const drive = await prisma.placementDrive.findUnique({
-        where: { id: Number(driveId) },
+        where: { id: driveIdNum },
         include: {
             eligibilityCriteria: true,
             eligibleBranches: true,
             eligibleYears: true,
+            company: {
+                select: {
+                    isActive: true,
+                },
+            },
+            jobRole: {
+                select: {
+                    companyId: true,
+                },
+            },
         },
     });
 
@@ -412,7 +609,7 @@ const checkStudentDriveEligibility = async (studentId, driveId) => {
     }
 
     const student = await prisma.student.findUnique({
-        where: { id: Number(studentId) },
+        where: { id: studentIdNum },
         include: {
             department: true,
             selection: true,
@@ -438,7 +635,8 @@ const checkStudentDriveEligibility = async (studentId, driveId) => {
         student,
         drive.eligibilityCriteria,
         eligibleBranchIds,
-        eligibleYears
+        eligibleYears,
+        drive
     );
 
     return {
