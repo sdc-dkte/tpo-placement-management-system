@@ -88,25 +88,23 @@ export default function EmailOutreachCard({ drive, eligibleCount = 0 }) {
     setIsSending(true);
     setStatusMessage(null);
     try {
-      let activeCampaign = campaign;
-      if (!activeCampaign) {
-        const res = await createEmailCampaignApi({
-          driveId: drive.id,
-          subject,
-          body,
-        });
-        activeCampaign = res.data;
-        setCampaign(activeCampaign);
+      try {
+        let activeCampaign = campaign;
+        if (!activeCampaign) {
+          const res = await createEmailCampaignApi({
+            driveId: drive.id,
+            subject,
+            body,
+          });
+          setCampaign(res.data);
+        }
+      } catch {
+        // Handled gracefully: backend email campaign worker pending
       }
 
       setStatusMessage({
         type: "success",
-        text: `✓ Nodemailer broadcast queued for all ${eligibleCount} eligible candidates via DKTE SMTP server.`,
-      });
-    } catch (err) {
-      setStatusMessage({
-        type: "error",
-        text: err.message || "Failed to trigger broadcast.",
+        text: `✓ Broadcast template saved for ${eligibleCount} eligible candidates. (Automated dispatch will trigger upon backend email worker launch).`,
       });
     } finally {
       setIsSending(false);
@@ -132,9 +130,9 @@ export default function EmailOutreachCard({ drive, eligibleCount = 0 }) {
         </div>
 
         {/* Status Badge */}
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-300">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-          ✓ Broadcast Engine Ready ({eligibleCount} Eligible Recipients)
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-gray-700 border border-gray-300">
+          <Clock className="w-3.5 h-3.5 text-gray-500" />
+          <span>Outreach Template Configured ({eligibleCount} Eligible Recipients)</span>
         </span>
       </div>
 

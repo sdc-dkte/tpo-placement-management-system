@@ -262,6 +262,11 @@ export default function BulkPrnPasteModal({
             <strong>DKTE Placement Clause 4.2 Lockdown:</strong> Confirming these placements will automatically lock these students' profiles from all subsequent campus placement drives.
           </div>
         </div>
+
+        {/* Backend Verification Note */}
+        <div className="p-2.5 bg-slate-100 border border-slate-300 rounded text-[11px] text-gray-700">
+          <strong>Backend Selection Verification:</strong> Preview matches PRNs against the loaded eligible candidate pool. Final database confirmation, duplicate PRN checks, and previous offer restrictions are enforced atomically by the backend placement selection engine upon submission.
+        </div>
       </div>
 
       {/* Modal Actions */}

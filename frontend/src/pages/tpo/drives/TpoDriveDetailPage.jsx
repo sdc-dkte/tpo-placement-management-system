@@ -23,6 +23,14 @@ import EmailOutreachCard from "./EmailOutreachCard";
 import CandidateRosterTable from "./CandidateRosterTable";
 import BulkPrnPasteModal from "./BulkPrnPasteModal";
 
+// Backend enforced lifecycle transitions
+const ALLOWED_STATUS_TRANSITIONS = {
+  UPCOMING: ["ONGOING", "CANCELLED"],
+  ONGOING: ["COMPLETED", "CANCELLED", "UPCOMING"],
+  COMPLETED: [],
+  CANCELLED: [],
+};
+
 /**
  * TPO Drive Details & Candidate Operations Page (/drives/:driveId)
  * 
@@ -342,13 +350,20 @@ export default function TpoDriveDetailPage({ driveId: propDriveId, onBack }) {
             <select
               value={drive.status}
               onChange={(e) => handleStatusChange(e.target.value)}
-              disabled={isUpdatingStatus || drive.status === "COMPLETED" || drive.status === "CANCELLED"}
-              className="text-xs font-bold px-2.5 py-1 rounded border border-[#E5E7EB] bg-white cursor-pointer focus:outline-none"
+              disabled={
+                isUpdatingStatus ||
+                (ALLOWED_STATUS_TRANSITIONS[drive.status] || []).length === 0
+              }
+              className="text-xs font-bold px-2.5 py-1 rounded border border-[#E5E7EB] bg-white cursor-pointer focus:outline-none disabled:bg-slate-100 disabled:text-gray-500"
             >
-              <option value="UPCOMING">UPCOMING</option>
-              <option value="ONGOING">ONGOING</option>
-              <option value="COMPLETED">COMPLETED</option>
-              <option value="CANCELLED">CANCELLED</option>
+              <option value={drive.status}>
+                {drive.status} {(ALLOWED_STATUS_TRANSITIONS[drive.status] || []).length === 0 ? "(Terminal)" : "(Current)"}
+              </option>
+              {(ALLOWED_STATUS_TRANSITIONS[drive.status] || []).map((nextStatus) => (
+                <option key={nextStatus} value={nextStatus}>
+                  Move to {nextStatus}
+                </option>
+              ))}
             </select>
           </div>
         </div>

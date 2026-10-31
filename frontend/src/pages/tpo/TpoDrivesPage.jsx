@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { getDrivesApi } from "../../api/drives";
+import { getDashboardOverviewApi } from "../../api/students";
 import DriveStatsBar from "./drives/DriveStatsBar";
 import CreateDriveModal from "./drives/CreateDriveModal";
 import TpoDriveDetailPage from "./drives/TpoDriveDetailPage";
@@ -28,6 +29,11 @@ export default function TpoDrivesPage() {
 
   // Drives data
   const [drives, setDrives] = useState([]);
+  const [overviewStats, setOverviewStats] = useState({
+    activeDrives: 0,
+    upcomingDrives: 0,
+    placedStudents: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -39,17 +45,39 @@ export default function TpoDrivesPage() {
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-  // Fetch drives from backend
+  // Fetch drives and backend overview metrics
   const loadDrives = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await getDrivesApi({
-        limit: 100,
-        sortBy: "createdAt",
-        sortOrder: "desc",
-      });
-      setDrives(res.data || []);
+      const [drivesRes, overviewRes] = await Promise.all([
+        getDrivesApi({
+          limit: 100,
+          sortBy: "createdAt",
+          sortOrder: "desc",
+        }),
+        getDashboardOverviewApi().catch(() => null),
+      ]);
+
+      const drivesList = drivesRes.data || [];
+      setDrives(drivesList);
+
+      if (overviewRes?.data) {
+        setOverviewStats({
+          activeDrives: overviewRes.data.ongoingDrives ?? drivesList.filter((d) => d.status === "ONGOING").length,
+          upcomingDrives: overviewRes.data.upcomingDrives ?? drivesList.filter((d) => d.status === "UPCOMING").length,
+          placedStudents: overviewRes.data.placedStudents ?? 0,
+        });
+      } else {
+        setOverviewStats({
+          activeDrives: drivesList.filter((d) => d.status === "ONGOING").length,
+          upcomingDrives: drivesList.filter((d) => d.status === "UPCOMING").length,
+          placedStudents: drivesList.reduce(
+            (acc, curr) => acc + (curr.selectionsCount || curr._count?.selections || 0),
+            0
+          ),
+        });
+      }
     } catch (err) {
       console.error("Error loading placement drives:", err);
       setError(err.message || "Failed to load placement drives.");
@@ -107,24 +135,18 @@ export default function TpoDrivesPage() {
     return true;
   });
 
-  // KPI Metrics Calculation
-  const activeCount = drives.filter((d) => d.status === "ONGOING").length;
-  const upcomingDrives = drives.filter((d) => d.status === "UPCOMING");
-  const upcomingCount = upcomingDrives.length;
-  const upcomingCompanies = upcomingDrives
+  // Upcoming company schedules for KPI card
+  const upcomingCompanies = drives
+    .filter((d) => d.status === "UPCOMING")
     .map((d) => d.companyName || d.company?.name)
     .filter(Boolean);
-
-  const placedCount = drives.reduce(
-    (acc, curr) => acc + (curr.selectionsCount || curr._count?.selections || 0),
-    0
-  );
 
   // Tab counts
   const countAll = drives.length;
   const countOngoing = drives.filter((d) => d.status === "ONGOING").length;
   const countUpcoming = drives.filter((d) => d.status === "UPCOMING").length;
   const countCompleted = drives.filter((d) => d.status === "COMPLETED").length;
+  const countCancelled = drives.filter((d) => d.status === "CANCELLED").length;
 
   return (
     <main className="p-6 space-y-6">
@@ -176,12 +198,12 @@ export default function TpoDrivesPage() {
         </div>
       )}
 
-      {/* 3 Focused KPI Cards */}
+      {/* 3 Focused KPI Cards (Driven by accurate backend overview data) */}
       <DriveStatsBar
-        activeDrivesCount={activeCount}
-        upcomingCount={upcomingCount}
+        activeDrivesCount={overviewStats.activeDrives}
+        upcomingCount={overviewStats.upcomingDrives}
         upcomingCompanies={upcomingCompanies}
-        placedStudentsCount={placedCount}
+        placedStudentsCount={overviewStats.placedStudents}
       />
 
       {/* Drives Table Container */}
@@ -235,6 +257,18 @@ export default function TpoDrivesPage() {
               }`}
             >
               Completed ({countCompleted})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("CANCELLED")}
+              className={`pb-3 font-semibold transition-colors cursor-pointer ${
+                activeTab === "CANCELLED"
+                  ? "border-b-2 border-[#FECC00] text-[#111827] font-bold"
+                  : "text-gray-500 hover:text-[#111827]"
+              }`}
+            >
+              Cancelled ({countCancelled})
             </button>
           </div>
 
@@ -356,6 +390,13 @@ export default function TpoDrivesPage() {
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
                         Drive Concluded
+                      </span>
+                    );
+                  } else if (status === "CANCELLED") {
+                    statusBadge = (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-800 border border-red-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
+                        Drive Cancelled
                       </span>
                     );
                   }
