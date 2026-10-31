@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -19,7 +18,7 @@ const importRoutes = require("./routes/import.routes");
 // const selectionRoutes = require("./routes/selection.routes");
 // const placementRoutes = require("./routes/placement.routes");
 // const dashboardRoutes = require("./routes/dashboard.routes");
-// const reportRoutes = require("./routes/report.routes");
+const reportRoutes = require("./routes/report.routes");
 // const documentRoutes = require("./routes/document.routes");
 // const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 // const departmentRoutes = require("./routes/department.routes");
@@ -31,10 +30,10 @@ const app = express();
 // ====================
 
 app.use(
-    cors({
-        origin: process.env.CLIENT_URL || "http://localhost:5173",
-        credentials: true,
-    })
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    credentials: true,
+  }),
 );
 
 app.use(express.json({ limit: "1mb" }));
@@ -45,11 +44,11 @@ app.use(express.urlencoded({ extended: true }));
 // ====================
 
 app.get("/", (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: "TPO Placement Management API",
-        version: "v1",
-    });
+  res.status(200).json({
+    success: true,
+    message: "TPO Placement Management API",
+    version: "v1",
+  });
 });
 
 // ====================
@@ -68,7 +67,7 @@ app.use("/api/v1/import", importRoutes);
 // app.use("/api/v1/selections", selectionRoutes);
 // app.use("/api/v1/placements", placementRoutes);
 // app.use("/api/v1/dashboard", dashboardRoutes);
-// app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/reports", reportRoutes);
 // app.use("/api/v1/documents", documentRoutes);
 // app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 // app.use("/api/v1/departments", departmentRoutes);
@@ -78,10 +77,10 @@ app.use("/api/v1/import", importRoutes);
 // ====================
 
 app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route not found: ${req.method} ${req.originalUrl}`,
-    });
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
 });
 
 // ====================
@@ -89,21 +88,18 @@ app.use((req, res) => {
 // ====================
 
 app.use((err, req, res, next) => {
-    console.error(err);
+  console.error(err);
 
-    if (res.headersSent) {
-        return next(err);
-    }
+  if (res.headersSent) {
+    return next(err);
+  }
 
-    const statusCode = err.statusCode || err.status || 500;
+  const statusCode = err.statusCode || err.status || 500;
 
-    return res.status(statusCode).json({
-        success: false,
-        message:
-            statusCode >= 500
-                ? "Internal server error"
-                : err.message || "Request failed",
-    });
+  return res.status(statusCode).json({
+    success: false,
+    message: statusCode >= 500 ? "Internal server error" : err.message || "Request failed",
+  });
 });
 
 // ====================
@@ -114,8 +110,8 @@ const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
 const server = app.listen(PORT, HOST, () => {
-    console.log(`🚀 TPO API running at http://localhost:${PORT}`);
-    console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+  console.log(`🚀 TPO API running at http://localhost:${PORT}`);
+  console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
 });
 
 // ====================
@@ -123,18 +119,18 @@ const server = app.listen(PORT, HOST, () => {
 // ====================
 
 const shutdown = async (signal) => {
-    console.log(`${signal} received. Shutting down server...`);
+  console.log(`${signal} received. Shutting down server...`);
 
-    server.close(async () => {
-        try {
-            await prisma.$disconnect();
-            console.log("Database disconnected.");
-            process.exit(0);
-        } catch (error) {
-            console.error("Shutdown error:", error);
-            process.exit(1);
-        }
-    });
+  server.close(async () => {
+    try {
+      await prisma.$disconnect();
+      console.log("Database disconnected.");
+      process.exit(0);
+    } catch (error) {
+      console.error("Shutdown error:", error);
+      process.exit(1);
+    }
+  });
 };
 
 process.on("SIGINT", () => shutdown("SIGINT"));
