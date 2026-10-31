@@ -25,6 +25,8 @@ model User {
   passwordHash String
   role         Role     @default(STUDENT)
   createdAt    DateTime @default(now())
+  mustChangePassword Boolean @default(true)
+  isActive Boolean @default(true)
 
   studentProfile    Student?
   academicImports   AcademicImportBatch[]
@@ -308,6 +310,7 @@ model EmailCampaign {
   confirmedAt     DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
+  cancellationReason String?
 
   drive      PlacementDrive   @relation(fields: [driveId], references: [id])
   createdBy  User             @relation(fields: [createdByUserId], references: [id])
