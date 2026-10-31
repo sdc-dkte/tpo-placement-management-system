@@ -3,8 +3,12 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-
 const prisma = require("./prismaClient");
+const {
+    recoverStagedDocumentFiles,
+    withDocumentFileOperation,
+} = require("./utils/documentFiles");
+const { listenAfterRecovery } = require("./utils/serverStartup");
 
 // Routes
 const healthRoutes = require("./routes/health.routes");
@@ -24,6 +28,9 @@ const eligibilityRoutes = require("./routes/eligibility.routes");
 // const placementRoutes = require("./routes/placement.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 // const reportRoutes = require("./routes/report.routes");
+const documentRoutes = require("./routes/document.routes");
+// const emailCampaignRoutes = require("./routes/emailCampaign.routes");
+// const departmentRoutes = require("./routes/department.routes");
 // const documentRoutes = require("./routes/document.routes");
 
 const emailCampaignRoutes = require("./routes/emailCampaign.routes");
@@ -80,6 +87,9 @@ app.use("/api/v1/eligibility", eligibilityRoutes);
 // app.use("/api/v1/placements", placementRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 // app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/documents", documentRoutes);
+// app.use("/api/v1/email-campaigns", emailCampaignRoutes);
+// app.use("/api/v1/departments", departmentRoutes);
 // app.use("/api/v1/documents", documentRoutes);
 
 app.use("/api/v1/email-campaigns", emailCampaignRoutes);
@@ -126,9 +136,41 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
-const server = app.listen(PORT, HOST, () => {
-    console.log(`🚀 TPO API running at http://localhost:${PORT}`);
-    console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+let server;
+let documentRecoveryInterval;
+
+const recoverDocumentFiles = () =>
+    withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)).catch(
+        (error) => {
+            console.error("Document file recovery failed; staged files were preserved:", error);
+        }
+    );
+
+const startServer = async () => {
+    server = await listenAfterRecovery(
+        () =>
+            withDocumentFileOperation(() =>
+                recoverStagedDocumentFiles(prisma)
+            ),
+        () =>
+            app.listen(PORT, HOST, () => {
+                console.log(`🚀 TPO API running at http://localhost:${PORT}`);
+                console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+            })
+    );
+
+    documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
+    documentRecoveryInterval.unref();
+};
+
+startServer().catch(async (error) => {
+    console.error("Initial document file recovery failed; server was not started:", error);
+    process.exitCode = 1;
+    try {
+        await prisma.$disconnect();
+    } catch (disconnectError) {
+        console.error("Failed to disconnect Prisma after startup failure:", disconnectError);
+    }
 });
 
 // ====================
@@ -137,8 +179,11 @@ const server = app.listen(PORT, HOST, () => {
 
 const shutdown = async (signal) => {
     console.log(`${signal} received. Shutting down server...`);
+    if (documentRecoveryInterval) {
+        clearInterval(documentRecoveryInterval);
+    }
 
-    server.close(async () => {
+    const disconnect = async () => {
         try {
             await prisma.$disconnect();
             console.log("Database disconnected.");
@@ -147,7 +192,13 @@ const shutdown = async (signal) => {
             console.error("Shutdown error:", error);
             process.exit(1);
         }
-    });
+    };
+
+    if (server) {
+        server.close(disconnect);
+    } else {
+        await disconnect();
+    }
 };
 
 process.on("SIGINT", () => shutdown("SIGINT"));
