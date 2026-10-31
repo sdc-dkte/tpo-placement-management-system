@@ -9,19 +9,20 @@ const getStudentReport = async (filters) => {
 
   // 1. Search by name, PRN or company
   if (search) {
+    const searchValue = search?.trim();
     where.AND.push({
       OR: [
         {
           user: {
             name: {
-              contains: search,
+              contains: searchValue,
               mode: "insensitive",
             },
           },
         },
         {
           PRN: {
-            contains: search,
+            contains: searchValue,
             mode: "insensitive",
           },
         },
@@ -31,7 +32,7 @@ const getStudentReport = async (filters) => {
               drive: {
                 company: {
                   name: {
-                    contains: search,
+                    contains: searchValue,
                     mode: "insensitive",
                   },
                 },
