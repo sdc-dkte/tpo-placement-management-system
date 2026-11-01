@@ -56,9 +56,11 @@ async function createSelection(req, res) {
       // Eligibility is recalculated from the student, academic and drive rows read inside this transaction, using the
       // shared rule engine. evaluateStudentEligibility is a pure function, so it works on transaction data (the service's
       // checkStudentDriveEligibility wrapper always reads through the global client and cannot join a transaction).
-      const currentStudent = await tx.student.findUnique({ where: { id: studentId }, include: { selection: true } });
+      const currentStudent = await tx.student.findUnique({ where: { id: studentId }, include: { selection: true, user: { select: { isActive: true } } } });
       const currentDrive = await tx.placementDrive.findUnique({ where: { id: driveId }, include: { eligibilityCriteria: true, eligibleBranches: true, eligibleYears: true } });
       if (!currentStudent || !currentDrive) throw failWith("P2025");
+      // Re-check the account status inside the transaction: the TPO could have deactivated the student after the first check.
+      if (!currentStudent.user?.isActive) throw failWith("STUDENT_INACTIVE");
       const eligibility = evaluateStudentEligibility(
         currentStudent,
         currentDrive.eligibilityCriteria,
@@ -71,6 +73,7 @@ async function createSelection(req, res) {
     return res.status(201).json({ success: true, message: "Student selection recorded successfully", data: toSelectionSummary(created) });
   } catch (e) {
     if (e.code === "P2002" || e.code === "OFFICIAL_SELECTION_EXISTS") return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.");
+    if (e.code === "STUDENT_INACTIVE") return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
     if (e.code === "NOT_ELIGIBLE") return error(res, 422, "NOT_ELIGIBLE", "Student does not currently meet this drive's eligibility criteria.", e.reasons.map(reason => ({ field: "eligibility", message: reason })));
     if (e.code === "P2003" || e.code === "P2025") return error(res, 404, "RELATED_RECORD_NOT_FOUND", "Student or drive was not found.");
     console.error("createSelection:", e);

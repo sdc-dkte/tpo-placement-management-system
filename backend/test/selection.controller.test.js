@@ -57,16 +57,18 @@ const makeSeed = () => ({
 
 let db;
 const transactionReads = [];
+const txHooks = {}; // a test can run code just before the transaction reads a model, to simulate another request committing in between
 test.beforeEach(() => {
   eligibilityCalls.length = 0;
   transactionReads.length = 0;
+  for (const key of Object.keys(txHooks)) delete txHooks[key];
   const client = createInMemoryPrisma(makeSeed());
   for (const key of Object.keys(prismaRef)) delete prismaRef[key];
   Object.assign(prismaRef, client);
   db = client.__db;
   // Wrap $transaction so reads made through the transaction client are recorded with their arguments.
   prismaRef.$transaction = callback => client.$transaction(tx => {
-    const record = (model) => ({ ...tx[model], findUnique: args => { transactionReads.push({ model, args }); return tx[model].findUnique(args); } });
+    const record = (model) => ({ ...tx[model], findUnique: args => { transactionReads.push({ model, args }); if (txHooks[model]) txHooks[model](); return tx[model].findUnique(args); } });
     return callback({ ...tx, student: record("student"), placementDrive: record("placementDrive") });
   });
 });
@@ -238,6 +240,16 @@ test("inactive student (User.isActive = false) -> 422 STUDENT_INACTIVE, nothing 
   assert.equal((await createSelection({ studentId: 1, driveId: 1 })).status, 201);
 });
 
+test("a student deactivated AFTER the first check but before the transaction read is still rejected: 422 STUDENT_INACTIVE, nothing stored", async () => {
+  // The first (pre-transaction) check sees an active user; the account is switched off just before the transaction re-reads it.
+  txHooks.student = () => { db.tables.user.find(u => u.id === 11).isActive = false; delete txHooks.student; };
+  const res = await createSelection({ studentId: 1, driveId: 1 });
+  assert.equal(res.status, 422);
+  assert.equal(res.body.error.code, "STUDENT_INACTIVE");
+  assert.equal(db.tables.studentSelection.length, 0);
+  assert.equal(eligibilityCalls.length, 0, "the rule engine must not run for an inactive student");
+});
+
 test("an inactive student does not block other, active students", async () => {
   db.tables.user.find(u => u.id === 11).isActive = false;
   assert.equal((await createSelection({ studentId: 3, driveId: 2 })).status, 201);
@@ -305,6 +317,7 @@ test("the rule engine's inputs are read INSIDE the transaction, with the relatio
   const driveRead = transactionReads.find(read => read.model === "placementDrive");
   assert.ok(studentRead && driveRead, "student and drive must be re-read through the transaction client");
   assert.equal(studentRead.args.include.selection, true);
+  assert.deepEqual(studentRead.args.include.user, { select: { isActive: true } }, "the account status is re-checked inside the transaction");
   assert.equal(studentRead.args.select, undefined, "a select would drop the scalar fields the rule engine reads");
   assert.deepEqual(driveRead.args.include, { eligibilityCriteria: true, eligibleBranches: true, eligibleYears: true });
 });
@@ -535,6 +548,57 @@ test("student with no selection gets 200 with data null; a student account witho
   const none = await request("GET", "/api/v1/students/me/selection", { token: studentToken(2) });
   assert.equal(none.status, 200);
   assert.equal(none.body.data, null);
-  const orphan = await request("GET", "/api/v1/students/me/selection", { token: tokenFor(999, "STUDENT") });
+  // A real, active STUDENT login that has no Student profile. The user row exists so an auth middleware that looks the user up in the database still lets the request through.
+  db.tables.user.push({ id: 99, name: "No Profile", email: "np@x.edu", role: "STUDENT", isActive: true, mustChangePassword: false });
+  const orphan = await request("GET", "/api/v1/students/me/selection", { token: tokenFor(99, "STUDENT") });
   assert.equal(orphan.status, 404);
+});
+
+// ------------------------------------------------------------------ 16. OPTIONAL: real PostgreSQL (skipped unless TEST_DATABASE_URL is set)
+// Run against a THROWAWAY, fully migrated database (never production):
+//   TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/tpo_test node --test backend/tests/selection.controller.test.js
+// It uses the real Prisma client and the real controller, creates its own rows (unique suffix) and deletes them afterwards.
+const realDatabaseUrl = process.env.TEST_DATABASE_URL;
+test("REAL POSTGRES: 8 simultaneous POST /selections for one student -> exactly one 201, the rest 409, exactly one row; inactive student -> 422", { skip: !realDatabaseUrl && "set TEST_DATABASE_URL to run against PostgreSQL" }, async () => {
+  const { PrismaClient } = require("@prisma/client");
+  const real = new PrismaClient({ datasources: { db: { url: realDatabaseUrl } } });
+  const suffix = `${Date.now()}`;
+  const created = {};
+  try {
+    // Route the controller's prismaClient at the real client (beforeEach installed the in-memory one).
+    for (const key of ["student", "placementDrive", "studentSelection", "user", "company", "jobRole", "department"]) prismaRef[key] = real[key];
+    prismaRef.$transaction = (...args) => real.$transaction(...args);
+
+    created.department = await real.department.create({ data: { name: `Dept ${suffix}`, code: `D${suffix}`.slice(0, 12) } });
+    created.tpo = await real.user.create({ data: { name: "TPO", email: `tpo-${suffix}@test.local`, passwordHash: "x", role: "TPO" } });
+    created.userA = await real.user.create({ data: { name: "A", email: `a-${suffix}@test.local`, passwordHash: "x", role: "STUDENT" } });
+    created.userB = await real.user.create({ data: { name: "B", email: `b-${suffix}@test.local`, passwordHash: "x", role: "STUDENT" } });
+    created.studentA = await real.student.create({ data: { userId: created.userA.id, PRN: `A${suffix}`, departmentId: created.department.id, graduationYear: 2026, academicPathway: "HSC" } });
+    created.studentB = await real.student.create({ data: { userId: created.userB.id, PRN: `B${suffix}`, departmentId: created.department.id, graduationYear: 2026, academicPathway: "HSC" } });
+    created.company = await real.company.create({ data: { name: `Co ${suffix}` } });
+    created.jobRole = await real.jobRole.create({ data: { companyId: created.company.id, title: "SDE" } });
+    created.drive = await real.placementDrive.create({ data: { companyId: created.company.id, jobRoleId: created.jobRole.id, title: `Drive ${suffix}`, packageLPA: 10 } }); // no criteria row = no restriction
+    const token = tokenFor(created.tpo.id, "TPO");
+
+    const results = await quietly(() => Promise.all(Array.from({ length: 8 }, () => request("POST", "/api/v1/selections", { token, body: { studentId: created.studentA.id, driveId: created.drive.id, packageLPA: 10 } }))));
+    const statuses = results.map(r => r.status).sort();
+    assert.deepEqual(statuses, [201, 409, 409, 409, 409, 409, 409, 409], JSON.stringify(results.map(r => r.body.error || r.status)));
+    assert.ok(results.filter(r => r.status === 409).every(r => r.body.error.code === "OFFICIAL_SELECTION_EXISTS"));
+    assert.equal(await real.studentSelection.count({ where: { studentId: created.studentA.id } }), 1);
+
+    await real.user.update({ where: { id: created.userB.id }, data: { isActive: false } });
+    const inactive = await createSelection({ studentId: created.studentB.id, driveId: created.drive.id }, token);
+    assert.equal(inactive.status, 422);
+    assert.equal(inactive.body.error.code, "STUDENT_INACTIVE");
+    assert.equal(await real.studentSelection.count({ where: { studentId: created.studentB.id } }), 0);
+  } finally {
+    await real.studentSelection.deleteMany({ where: { driveId: created.drive?.id ?? -1 } }).catch(() => {});
+    if (created.drive) await real.placementDrive.delete({ where: { id: created.drive.id } }).catch(() => {});
+    if (created.jobRole) await real.jobRole.delete({ where: { id: created.jobRole.id } }).catch(() => {});
+    if (created.company) await real.company.delete({ where: { id: created.company.id } }).catch(() => {});
+    for (const s of [created.studentA, created.studentB]) if (s) await real.student.delete({ where: { id: s.id } }).catch(() => {});
+    for (const u of [created.userA, created.userB, created.tpo]) if (u) await real.user.delete({ where: { id: u.id } }).catch(() => {});
+    if (created.department) await real.department.delete({ where: { id: created.department.id } }).catch(() => {});
+    await real.$disconnect();
+  }
 });
