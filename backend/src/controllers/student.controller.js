@@ -175,8 +175,19 @@ const createStudent = async (req, res) => {
         const passwordHash = await bcrypt.hash(PRN.trim(), 12);
 
         const student = await prisma.$transaction(async (tx) => {
+            const user = await tx.user.create({
+                data: {
+                    name: normalizedName,
+                    email: normalizedEmail,
+                    passwordHash,
+                    role: "STUDENT",
+                    mustChangePassword: true,
+                },
+            });
+
             return tx.student.create({
                 data: {
+                    userId: user.id,
                     PRN: normalizedPRN,
                     departmentId,
                     graduationYear,
@@ -192,16 +203,6 @@ const createStudent = async (req, res) => {
                             ? diplomaPercentage
                             : null,
                     activeBacklogs: activeBacklogs ?? 0,
-
-                    user: {
-                        create: {
-                            name: normalizedName,
-                            email: normalizedEmail,
-                            passwordHash,
-                            role: "STUDENT",
-                            mustChangePassword: true
-                        },
-                    },
                 },
                 select: {
                     id: true,
@@ -220,7 +221,7 @@ const createStudent = async (req, res) => {
                             name: true,
                             email: true,
                             role: true,
-                            mustChangePassword: true
+                            mustChangePassword: true,
                         },
                     },
                 },
@@ -463,7 +464,18 @@ const getStudents = async (req, res) => {
                     // Keep this only if selection is a single optional relation.
                     selection: {
                         select: {
+                            id: true,
                             status: true,
+                            packageLPA: true,
+                            drive: {
+                                select: {
+                                    company: {
+                                        select: {
+                                            name: true,
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -480,6 +492,7 @@ const getStudents = async (req, res) => {
                 placementStatus: selection
                     ? selection.status
                     : "NOT_SELECTED",
+                selection,
             };
         });
 

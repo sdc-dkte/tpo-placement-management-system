@@ -42,10 +42,10 @@ function mapBackendStudentToRoster(student) {
 
   // If student is placed but backend did not join company name, reflect that reality
   const organization = isPlaced
-    ? student.selection?.company?.name || "Placed (Company not returned by API)"
+    ? student.selection?.drive?.company?.name || student.selection?.company?.name || "Placed"
     : isInReview
     ? "Drive in Review"
-    : "Open to Drives —";
+    : "Open to Drives";
 
   return {
     id: student.id,
@@ -326,6 +326,7 @@ export default function StudentDirectoryPage() {
           type: "error",
           message: err.message || `Failed to update candidate ${payload.name}.`,
         });
+        throw err;
       }
     } else {
       // 2. Create New Candidate
@@ -344,6 +345,7 @@ export default function StudentDirectoryPage() {
           type: "error",
           message: err.message || `Failed to onboard candidate ${payload.name}.`,
         });
+        throw err;
       }
     }
 

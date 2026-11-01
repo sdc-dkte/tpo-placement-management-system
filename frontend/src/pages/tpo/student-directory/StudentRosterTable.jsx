@@ -202,8 +202,8 @@ export default function StudentRosterTable({
                           {student.packageLPA && ` (Est. ₹${student.packageLPA} LPA)`}
                         </span>
                       ) : (
-                        <span className="text-gray-400 text-[11px]">
-                          Open to Drives —
+                        <span className="text-gray-400 text-xs">
+                          Open to Drives
                         </span>
                       )}
                     </td>
