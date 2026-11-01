@@ -11,12 +11,12 @@ const {
 } = require("../controllers/report.controller");
 
 // Get student reports
-router.get("/", getAllStudents);
+router.get("/", authMiddleware, roleMiddleware("TPO"), getAllStudents);
 
 // Export student reports as PDF
-router.get("/export/pdf", exportStudentReportPDF);
+router.get("/export/pdf", authMiddleware, roleMiddleware("TPO"), exportStudentReportPDF);
 
 // Export student reports as Excel
-router.get("/export/excel", exportStudentReportExcel);
+router.get("/export/excel", authMiddleware, roleMiddleware("TPO"), exportStudentReportExcel);
 
 module.exports = router;
