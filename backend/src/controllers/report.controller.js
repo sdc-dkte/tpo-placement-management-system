@@ -27,8 +27,6 @@ const getAllStudents = async (req, res) => {
       });
     }
 
-    console.error("Student report error:", err);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch student report",
@@ -71,6 +69,9 @@ const exportStudentReportPDF = async (req, res) => {
     pdfDoc.pipe(res);
     pdfDoc.end();
   } catch (err) {
+    if (res.headersSent) {
+      return res.destroy(err);
+    }
     if (err instanceof ValidationError) {
       return res.status(400).json({
         success: false,
@@ -108,6 +109,10 @@ const exportStudentReportExcel = async (req, res) => {
     res.end();
   } catch (err) {
     console.log(err);
+    if (res.headersSent) {
+      return res.destroy(err);
+    }
+
     if (err instanceof ValidationError) {
       return res.status(400).json({
         success: false,
