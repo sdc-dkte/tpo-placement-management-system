@@ -1,20 +1,15 @@
-
 require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
 const prisma = require("./prismaClient");
-const {
-    recoverStagedDocumentFiles,
-    withDocumentFileOperation,
-} = require("./utils/documentFiles");
+const { recoverStagedDocumentFiles, withDocumentFileOperation } = require("./utils/documentFiles");
 const { listenAfterRecovery } = require("./utils/serverStartup");
 
 // Routes
 const healthRoutes = require("./routes/health.routes");
 const authRoutes = require("./routes/auth.routes");
 const importRoutes = require("./routes/import.routes");
-
 
 const studentRoutes = require("./routes/student.routes");
 const companyRoutes = require("./routes/company.routes");
@@ -27,7 +22,7 @@ const eligibilityRoutes = require("./routes/eligibility.routes");
 // const selectionRoutes = require("./routes/selection.routes");
 // const placementRoutes = require("./routes/placement.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
-// const reportRoutes = require("./routes/report.routes");
+const reportRoutes = require("./routes/report.routes");
 const documentRoutes = require("./routes/document.routes");
 // const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 // const departmentRoutes = require("./routes/department.routes");
@@ -36,8 +31,6 @@ const documentRoutes = require("./routes/document.routes");
 const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 const departmentRoutes = require("./routes/department.routes");
 
-
-
 const app = express();
 
 // ====================
@@ -45,10 +38,10 @@ const app = express();
 // ====================
 
 app.use(
-    cors({
-        origin: process.env.CLIENT_URL || "http://localhost:5173",
-        credentials: true,
-    })
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    credentials: true,
+  }),
 );
 
 app.use(express.json({ limit: "1mb" }));
@@ -59,11 +52,11 @@ app.use(express.urlencoded({ extended: true }));
 // ====================
 
 app.get("/", (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: "TPO Placement Management API",
-        version: "v1",
-    });
+  res.status(200).json({
+    success: true,
+    message: "TPO Placement Management API",
+    version: "v1",
+  });
 });
 
 // ====================
@@ -73,7 +66,6 @@ app.get("/", (req, res) => {
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/import", importRoutes);
-
 
 app.use("/api/v1/students", studentRoutes);
 app.use("/api/v1/companies", companyRoutes);
@@ -86,7 +78,7 @@ app.use("/api/v1/eligibility", eligibilityRoutes);
 // app.use("/api/v1/selections", selectionRoutes);
 // app.use("/api/v1/placements", placementRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
-// app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/documents", documentRoutes);
 // app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 // app.use("/api/v1/departments", departmentRoutes);
@@ -95,16 +87,15 @@ app.use("/api/v1/documents", documentRoutes);
 app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 app.use("/api/v1/departments", departmentRoutes);
 
-
 // ====================
 // 4. Not Found Handler
 // ====================
 
 app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route not found: ${req.method} ${req.originalUrl}`,
-    });
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
 });
 
 // ====================
@@ -112,21 +103,18 @@ app.use((req, res) => {
 // ====================
 
 app.use((err, req, res, next) => {
-    console.error(err);
+  console.error(err);
 
-    if (res.headersSent) {
-        return next(err);
-    }
+  if (res.headersSent) {
+    return next(err);
+  }
 
-    const statusCode = err.statusCode || err.status || 500;
+  const statusCode = err.statusCode || err.status || 500;
 
-    return res.status(statusCode).json({
-        success: false,
-        message:
-            statusCode >= 500
-                ? "Internal server error"
-                : err.message || "Request failed",
-    });
+  return res.status(statusCode).json({
+    success: false,
+    message: statusCode >= 500 ? "Internal server error" : err.message || "Request failed",
+  });
 });
 
 // ====================
@@ -140,37 +128,32 @@ let server;
 let documentRecoveryInterval;
 
 const recoverDocumentFiles = () =>
-    withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)).catch(
-        (error) => {
-            console.error("Document file recovery failed; staged files were preserved:", error);
-        }
-    );
+  withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)).catch((error) => {
+    console.error("Document file recovery failed; staged files were preserved:", error);
+  });
 
 const startServer = async () => {
-    server = await listenAfterRecovery(
-        () =>
-            withDocumentFileOperation(() =>
-                recoverStagedDocumentFiles(prisma)
-            ),
-        () =>
-            app.listen(PORT, HOST, () => {
-                console.log(`🚀 TPO API running at http://localhost:${PORT}`);
-                console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
-            })
-    );
+  server = await listenAfterRecovery(
+    () => withDocumentFileOperation(() => recoverStagedDocumentFiles(prisma)),
+    () =>
+      app.listen(PORT, HOST, () => {
+        console.log(`🚀 TPO API running at http://localhost:${PORT}`);
+        console.log(`🩺 Health check: http://localhost:${PORT}/api/v1/health`);
+      }),
+  );
 
-    documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
-    documentRecoveryInterval.unref();
+  documentRecoveryInterval = setInterval(recoverDocumentFiles, 60_000);
+  documentRecoveryInterval.unref();
 };
 
 startServer().catch(async (error) => {
-    console.error("Initial document file recovery failed; server was not started:", error);
-    process.exitCode = 1;
-    try {
-        await prisma.$disconnect();
-    } catch (disconnectError) {
-        console.error("Failed to disconnect Prisma after startup failure:", disconnectError);
-    }
+  console.error("Initial document file recovery failed; server was not started:", error);
+  process.exitCode = 1;
+  try {
+    await prisma.$disconnect();
+  } catch (disconnectError) {
+    console.error("Failed to disconnect Prisma after startup failure:", disconnectError);
+  }
 });
 
 // ====================
@@ -178,27 +161,27 @@ startServer().catch(async (error) => {
 // ====================
 
 const shutdown = async (signal) => {
-    console.log(`${signal} received. Shutting down server...`);
-    if (documentRecoveryInterval) {
-        clearInterval(documentRecoveryInterval);
-    }
+  console.log(`${signal} received. Shutting down server...`);
+  if (documentRecoveryInterval) {
+    clearInterval(documentRecoveryInterval);
+  }
 
-    const disconnect = async () => {
-        try {
-            await prisma.$disconnect();
-            console.log("Database disconnected.");
-            process.exit(0);
-        } catch (error) {
-            console.error("Shutdown error:", error);
-            process.exit(1);
-        }
-    };
-
-    if (server) {
-        server.close(disconnect);
-    } else {
-        await disconnect();
+  const disconnect = async () => {
+    try {
+      await prisma.$disconnect();
+      console.log("Database disconnected.");
+      process.exit(0);
+    } catch (error) {
+      console.error("Shutdown error:", error);
+      process.exit(1);
     }
+  };
+
+  if (server) {
+    server.close(disconnect);
+  } else {
+    await disconnect();
+  }
 };
 
 process.on("SIGINT", () => shutdown("SIGINT"));
