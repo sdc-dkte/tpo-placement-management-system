@@ -27,16 +27,21 @@ const fonts = {
 pdfmake.addFonts(fonts);
 
 // DKTE logo
-const logoPath = path.resolve(__dirname, "../../../frontend/src/assets/dkte-logo.png");
-
-if (!fs.existsSync(logoPath)) {
-  throw new Error(`DKTE logo not found: ${logoPath}`);
+// DKTE logo (optional)
+const logoPath = path.resolve(__dirname, "../assets/dkte-logo.png");
+let logoData = null;
+try {
+  if (fs.existsSync(logoPath)) {
+    const logoBase64 = fs.readFileSync(logoPath).toString("base64");
+    logoData = `data:image/png;base64,${logoBase64}`;
+  } else {
+    console.warn("DKTE logo not found. Generating PDF without logo.");
+  }
+} catch (err) {
+  console.warn("Unable to load DKTE logo:", err.message);
 }
 
-const logoBase64 = fs.readFileSync(logoPath).toString("base64");
-const logoData = `data:image/png;base64,${logoBase64}`;
-
-const generateStudentReportPDF = async (students) => {
+const generateStudentReportPDF = async (students, filters = {}) => {
   // Placement calculations
   const totalStudents = students.length;
 
@@ -46,6 +51,27 @@ const generateStudentReportPDF = async (students) => {
 
   const placementRate =
     totalStudents === 0 ? "0.00" : ((placedCount / totalStudents) * 100).toFixed(2);
+
+  // Report generation date and time
+  const generatedOn = new Date().toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  // Applied filters
+  const filterLabels = {
+    search: "Search",
+    department: "Department",
+    batch: "Batch",
+    company: "Company",
+    placementStatus: "Placement Status",
+  };
+
+  const appliedFilters = Object.entries(filterLabels)
+    .filter(([key]) => filters[key]?.trim())
+    .map(([key, label]) => `${label}: ${filters[key].trim()}`);
+
+  const filterText = appliedFilters.length > 0 ? appliedFilters.join(" | ") : "None";
 
   // Original eight database column names
   const tableBody = [
@@ -92,11 +118,16 @@ const generateStudentReportPDF = async (students) => {
         {
           columns: [
             // Logo on the left
-            {
-              image: logoData,
-              width: 95,
-              fit: [95, 45],
-            },
+            logoData
+              ? {
+                  image: logoData,
+                  width: 95,
+                  fit: [95, 45],
+                }
+              : {
+                  width: 95,
+                  text: "",
+                },
 
             // College name centered on the page
             {
@@ -148,6 +179,19 @@ const generateStudentReportPDF = async (students) => {
     },
 
     content: [
+      //Generated date and applied filter
+      {
+        text: `Generated On: ${generatedOn}`,
+        fontSize: 9,
+        color: "#555555",
+        margin: [0, 0, 0, 5],
+      },
+      {
+        text: `Applied Filters: ${filterText}`,
+        fontSize: 9,
+        color: "#555555",
+        margin: [0, 0, 0, 15],
+      },
       // Overall placement summary
       {
         text: "Overall Placement Summary",
@@ -190,7 +234,7 @@ const generateStudentReportPDF = async (students) => {
                 dontBreakRows: true,
 
                 // All eight columns with balanced widths
-                widths: [120, 130, 200, 90, 120, 170, 100, 190],
+                widths: ["*", "*", "*", "auto", "*", "auto", "*", "*"],
 
                 body: tableBody,
               },
