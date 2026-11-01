@@ -1,5 +1,5 @@
 const prisma = require("../prismaClient");
-const { checkStudentEligibility } = require("../services/eligibility.service");
+const { evaluateStudentEligibility } = require("../services/eligibility.service");
 
 // V1 is a direct-selection workflow: the TPO verifies the outcome outside the portal and records it here.
 // Nothing in this file reads or writes DriveParticipation or PlacementStatusHistory.
@@ -29,32 +29,42 @@ const toSelectionSummary = selection => ({ selectionId: selection.id, studentId:
 async function createSelection(req, res) {
   const studentId = validId(req.body?.studentId) ? Number(req.body.studentId) : NaN;
   const driveId = validId(req.body?.driveId) ? Number(req.body.driveId) : NaN;
-  // Missing packageLPA falls back to the drive's package; an explicit null is invalid, not "missing".
-  const requestedPackage = req.body?.packageLPA === undefined ? undefined : parsePackageLPA(req.body.packageLPA);
+  // packageLPA is required. A missing, null or malformed value is rejected; the drive's package is never used as a fallback.
+  const packageLPA = parsePackageLPA(req.body?.packageLPA);
   if (!validId(studentId) || !validId(driveId)) return error(res, 400, "VALIDATION_ERROR", "studentId and driveId must be positive integers.");
-  if (requestedPackage === null) return error(res, 400, "VALIDATION_ERROR", "packageLPA must be a positive number.", [{ field: "packageLPA", message: "Send a number greater than 0, for example 12.5." }]);
+  if (packageLPA === null) return error(res, 400, "VALIDATION_ERROR", "packageLPA is required and must be a positive number.", [{ field: "packageLPA", message: "Send a number greater than 0, for example 12.5." }]);
 
   try {
     const [student, drive, existing] = await Promise.all([
-      prisma.student.findUnique({ where: { id: studentId }, select: { id: true } }),
+      prisma.student.findUnique({ where: { id: studentId }, select: { id: true, user: { select: { isActive: true } } } }),
       prisma.placementDrive.findUnique({ where: { id: driveId }, include: { company: { select: { id: true, name: true, isActive: true } }, jobRole: { select: { id: true, title: true, companyId: true } } } }),
       prisma.studentSelection.findUnique({ where: { studentId }, select: { id: true } }),
     ]);
     if (!student) return error(res, 404, "STUDENT_NOT_FOUND", "Student not found.");
     if (!drive) return error(res, 404, "DRIVE_NOT_FOUND", "Placement drive not found.");
+    if (!student.user?.isActive) return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
     if (existing) return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.", [{ field: "studentId", message: `Existing selectionId: ${existing.id}.` }]);
     // Results are recorded after the recruitment process, so only a cancelled drive is an invalid target.
     if (drive.status === "CANCELLED") return error(res, 422, "DRIVE_CLOSED", "Cannot create a selection for a cancelled drive.");
     if (!drive.company?.isActive) return error(res, 422, "COMPANY_INACTIVE", "The drive's company is inactive.");
     if (!drive.jobRole || drive.jobRole.companyId !== drive.companyId) return error(res, 422, "JOB_ROLE_COMPANY_MISMATCH", "The drive job role must belong to the same company as the drive.");
 
-    const packageLPA = requestedPackage === undefined ? drive.packageLPA : requestedPackage;
     const created = await prisma.$transaction(async tx => {
       // The unique studentId constraint is the final concurrency guard; this recheck only gives a clean message.
       const duplicate = await tx.studentSelection.findUnique({ where: { studentId }, select: { id: true } });
       if (duplicate) throw failWith("OFFICIAL_SELECTION_EXISTS");
-      // Eligibility is always recalculated from current student, academic and drive data, never from a stored flag.
-      const eligibility = await checkStudentEligibility(studentId, driveId, tx);
+      // Eligibility is recalculated from the student, academic and drive rows read inside this transaction, using the
+      // shared rule engine. evaluateStudentEligibility is a pure function, so it works on transaction data (the service's
+      // checkStudentDriveEligibility wrapper always reads through the global client and cannot join a transaction).
+      const currentStudent = await tx.student.findUnique({ where: { id: studentId }, include: { selection: true } });
+      const currentDrive = await tx.placementDrive.findUnique({ where: { id: driveId }, include: { eligibilityCriteria: true, eligibleBranches: true, eligibleYears: true } });
+      if (!currentStudent || !currentDrive) throw failWith("P2025");
+      const eligibility = evaluateStudentEligibility(
+        currentStudent,
+        currentDrive.eligibilityCriteria,
+        currentDrive.eligibleBranches.map(branch => branch.departmentId),
+        currentDrive.eligibleYears.map(year => year.graduationYear)
+      );
       if (!eligibility.isEligible) throw failWith("NOT_ELIGIBLE", { reasons: eligibility.reasons });
       return tx.studentSelection.create({ data: { studentId, driveId, status: "SELECTED", packageLPA } });
     });
