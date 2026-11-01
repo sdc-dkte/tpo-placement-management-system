@@ -1,6 +1,22 @@
 const ExcelJS = require("exceljs");
 
-const generateStudentReportExcel = async (students) => {
+// Prevent spreadsheet formula injection
+const safeExcelText = (value) => {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  const text = String(value);
+
+  // Escape values that begin with formula-triggering characters
+  if (/^[\s]*[=+\-@]/.test(text)) {
+    return `'${text}`;
+  }
+
+  return text;
+};
+
+const generateStudentReportExcel = async (students, filters = {}) => {
   const workbook = new ExcelJS.Workbook();
 
   workbook.creator = "DKTE Training and Placement Cell";
@@ -9,6 +25,27 @@ const generateStudentReportExcel = async (students) => {
   workbook.created = new Date();
 
   const worksheet = workbook.addWorksheet("Placement Report");
+
+  // Report generation date and time
+  const generatedOn = new Date().toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  // Applied filters
+  const filterLabels = {
+    search: "Search",
+    department: "Department",
+    batch: "Batch",
+    company: "Company",
+    placementStatus: "Placement Status",
+  };
+
+  const appliedFilters = Object.entries(filterLabels)
+    .filter(([key]) => typeof filters[key] === "string" && filters[key].trim())
+    .map(([key, label]) => `${label}: ${filters[key].trim()}`);
+
+  const filterText = appliedFilters.length > 0 ? appliedFilters.join(" | ") : "None";
 
   // Calculate placement summary
   const totalStudents = students.length;
@@ -81,10 +118,27 @@ const generateStudentReportExcel = async (students) => {
 
   worksheet.getRow(4).height = 3;
 
-  // Placement summary
-  worksheet.getCell("A6").value = "Overall Placement Summary";
+  // Report metadata
+  worksheet.mergeCells("A5:H5");
+  worksheet.getCell("A5").value = `Generated On: ${generatedOn}`;
+  worksheet.getCell("A5").font = {
+    name: "Arial",
+    size: 10,
+    color: { argb: "FF555555" },
+  };
 
+  worksheet.mergeCells("A6:H6");
+  worksheet.getCell("A6").value = `Applied Filters: ${filterText}`;
   worksheet.getCell("A6").font = {
+    name: "Arial",
+    size: 10,
+    color: { argb: "FF555555" },
+  };
+
+  // Placement summary
+  worksheet.getCell("A8").value = "Overall Placement Summary";
+
+  worksheet.getCell("A8").font = {
     size: 13,
     bold: true,
     color: { argb: "FF000000" },
@@ -100,8 +154,8 @@ const generateStudentReportExcel = async (students) => {
   summary.forEach(([label, value], index) => {
     const column = index * 2 + 1;
 
-    const labelCell = worksheet.getCell(7, column);
-    const valueCell = worksheet.getCell(7, column + 1);
+    const labelCell = worksheet.getCell(9, column);
+    const valueCell = worksheet.getCell(9, column + 1);
 
     labelCell.value = label;
     valueCell.value = value;
@@ -111,7 +165,7 @@ const generateStudentReportExcel = async (students) => {
   });
 
   // Table heading
-  const headerRowNumber = 9;
+  const headerRowNumber = 11;
 
   const headers = ["Name", "PRN", "Department", "Batch", "Status", "Company", "Package", "Offer"];
 
@@ -148,50 +202,68 @@ const generateStudentReportExcel = async (students) => {
   });
 
   // Student records
-  students.forEach((student, index) => {
-    const row = worksheet.addRow([
-      student.name || "-",
-      student.PRN || "-",
-      student.department || "-",
-      student.batch || "-",
-      student.placementStatus || "-",
-      student.company || "-",
-      student.packageLPA != null ? `${student.packageLPA} LPA` : "-",
-      student.offerStatus || "-",
-    ]);
+  if (students.length === 0) {
+    worksheet.mergeCells("A12:H12");
+    const emptyMessage = worksheet.getCell("A12");
+    emptyMessage.value = "No student records found.";
 
-    row.height = 22;
+    emptyMessage.font = {
+      name: "Arial",
+      size: 12,
+      italic: true,
+      color: { argb: "FF666666" },
+    };
 
-    row.eachCell((cell) => {
-      cell.font = {
-        name: "Arial",
-        size: 10,
-        color: { argb: "FF000000" },
-      };
+    emptyMessage.alignment = {
+      horizontal: "center",
+      vertical: "middle",
+    };
 
-      cell.alignment = {
-        vertical: "middle",
-        horizontal: "left",
-        wrapText: true,
-      };
+    worksheet.getRow(12).height = 30;
+  } else {
+    students.forEach((student, index) => {
+      const row = worksheet.addRow([
+        safeExcelText(student.name),
+        safeExcelText(student.PRN),
+        safeExcelText(student.department),
+        safeExcelText(student.batch),
+        safeExcelText(student.placementStatus),
+        safeExcelText(student.company),
+        student.packageLPA != null ? `${student.packageLPA} LPA` : "-",
+        safeExcelText(student.offerStatus),
+      ]);
+      row.height = 22;
 
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFDDDDDD" } },
-        bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
-        left: { style: "thin", color: { argb: "FFDDDDDD" } },
-        right: { style: "thin", color: { argb: "FFDDDDDD" } },
-      };
-
-      // Alternate light-grey rows
-      if (index % 2 === 1) {
-        cell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFF2F2F2" },
+      row.eachCell((cell) => {
+        cell.font = {
+          name: "Arial",
+          size: 10,
+          color: { argb: "FF000000" },
         };
-      }
+
+        cell.alignment = {
+          vertical: "middle",
+          horizontal: "left",
+          wrapText: true,
+        };
+
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFDDDDDD" } },
+          bottom: { style: "thin", color: { argb: "FFDDDDDD" } },
+          left: { style: "thin", color: { argb: "FFDDDDDD" } },
+          right: { style: "thin", color: { argb: "FFDDDDDD" } },
+        };
+
+        if (index % 2 === 1) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF2F2F2" },
+          };
+        }
+      });
     });
-  });
+  }
 
   // Enable filters for all eight columns
   const lastRow = Math.max(headerRowNumber, worksheet.rowCount);

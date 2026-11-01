@@ -1,27 +1,37 @@
-const { getStudentReport } = require("../services/report.service");
+const { getStudentReport, getPaginatedStudentReport } = require("../services/report.service");
 const { generateStudentReportPDF } = require("../services/report-pdf.service");
 const { generateStudentReportExcel } = require("../services/report-excel.service");
+const ValidationError = require("../utils/ValidationError");
 
 const getAllStudents = async (req, res) => {
   try {
-    const reportData = await getStudentReport(req.query);
+    const { page, limit, ...filters } = req.query;
+
+    const reportData = await getPaginatedStudentReport(filters, page, limit);
 
     return res.status(200).json({
       success: true,
-      count: reportData.length,
-      data: reportData,
+      count: reportData.data.length,
+      total: reportData.total,
+      page: reportData.page,
+      limit: reportData.limit,
+      totalPages: reportData.totalPages,
+      data: reportData.data,
     });
   } catch (err) {
-    console.error("Error fetching student report:", err);
+    console.error("Student report error:", err);
+    if (err instanceof ValidationError) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+      });
+    }
 
-    const isValidationError =
-      err.message.startsWith("Invalid batch") ||
-      err.message.startsWith("Invalid academic year") ||
-      err.message.startsWith("Invalid placement status");
+    console.error("Student report error:", err);
 
-    return res.status(isValidationError ? 400 : 500).json({
+    return res.status(500).json({
       success: false,
-      message: isValidationError ? err.message : "Failed to fetch student report",
+      message: "Failed to fetch student report",
     });
   }
 };
@@ -38,18 +48,40 @@ const exportStudentReportPDF = async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="student-placement-report.pdf"');
 
+    // 4. Handle PDF stream errors
+    pdfDoc.on("error", (err) => {
+      console.error("PDF stream error:", err);
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Failed to generate PDF report",
+        });
+      } else {
+        res.destroy(err);
+      }
+    });
+
+    // 5. Handle response errors
+    res.on("error", (err) => {
+      console.error("PDF response error:", err);
+    });
+
     // 4. Send PDF to the browser
     pdfDoc.pipe(res);
     pdfDoc.end();
   } catch (err) {
-    console.error("PDF export error:", err);
-
-    if (!res.headersSent) {
-      return res.status(500).json({
+    if (err instanceof ValidationError) {
+      return res.status(400).json({
         success: false,
-        message: "Failed to generate PDF report",
+        message: err.message,
       });
     }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate PDF report",
+    });
   }
 };
 
@@ -57,9 +89,10 @@ const exportStudentReportExcel = async (req, res) => {
   try {
     // 1. Fetch students using existing search and filters
     const students = await getStudentReport(req.query);
+    console.log("Students received by Excel service:", students.length);
 
     // 2. Generate Excel workbook
-    const workbook = await generateStudentReportExcel(students);
+    const workbook = await generateStudentReportExcel(students, req.query);
 
     // 3. Set response headers
     res.setHeader(
@@ -74,14 +107,18 @@ const exportStudentReportExcel = async (req, res) => {
 
     res.end();
   } catch (err) {
-    console.error("Excel export error:", err);
-
-    if (!res.headersSent) {
-      return res.status(500).json({
+    console.log(err);
+    if (err instanceof ValidationError) {
+      return res.status(400).json({
         success: false,
-        message: "Failed to generate Excel report",
+        message: err.message,
       });
     }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate Excel report",
+    });
   }
 };
 
