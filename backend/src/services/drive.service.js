@@ -64,7 +64,7 @@ const validateEligibilityCriteria = (eligibility) => {
         );
     }
 
-    if (eligibility.maximumBacklogs !== undefined) {
+    if (eligibility.maximumBacklogs !== undefined && eligibility.maximumBacklogs !== null) {
         if (
             !Number.isInteger(eligibility.maximumBacklogs) ||
             eligibility.maximumBacklogs < 0 ||
@@ -777,8 +777,17 @@ const updatePlacementDrive = async (driveId, payload) => {
     let finalCompanyId = existing.companyId;
     let finalJobRoleId = existing.jobRoleId;
 
-    if (companyId !== undefined) {
-        finalCompanyId = parsePositiveInteger(companyId, "companyId");
+    if (companyId !== undefined || jobRoleId !== undefined) {
+        if (companyId !== undefined) {
+            finalCompanyId = parsePositiveInteger(companyId, "companyId");
+            dataToUpdate.companyId = finalCompanyId;
+        }
+
+        if (jobRoleId !== undefined) {
+            finalJobRoleId = parsePositiveInteger(jobRoleId, "jobRoleId");
+            dataToUpdate.jobRoleId = finalJobRoleId;
+        }
+
         const company = await prisma.company.findUnique({
             where: { id: finalCompanyId },
         });
@@ -787,15 +796,7 @@ const updatePlacementDrive = async (driveId, payload) => {
             error.statusCode = 404;
             throw error;
         }
-        dataToUpdate.companyId = finalCompanyId;
-    }
 
-    if (jobRoleId !== undefined) {
-        finalJobRoleId = parsePositiveInteger(jobRoleId, "jobRoleId");
-        dataToUpdate.jobRoleId = finalJobRoleId;
-    }
-
-    if (companyId !== undefined || jobRoleId !== undefined) {
         const role = await prisma.jobRole.findUnique({
             where: { id: finalJobRoleId },
         });
@@ -1013,6 +1014,14 @@ const updatePlacementDriveStatus = async (driveId, newStatus) => {
 const replaceEligibilityCriteria = async (driveId, payload) => {
     const driveIdNum = parsePositiveInteger(driveId, "driveId");
 
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        const error = new Error("Eligibility criteria payload must be an object.");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    validateEligibilityCriteria(payload);
+
     const drive = await prisma.placementDrive.findUnique({
         where: { id: driveIdNum },
     });
@@ -1022,18 +1031,6 @@ const replaceEligibilityCriteria = async (driveId, payload) => {
         error.statusCode = 404;
         throw error;
     }
-
-    const error = (message) => {
-        const err = new Error(message);
-        err.statusCode = 400;
-        throw err;
-    };
-
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-        error("Eligibility criteria payload must be an object.");
-    }
-
-    validateEligibilityCriteria(payload);
 
     const {
         minimumCGPA = 0,

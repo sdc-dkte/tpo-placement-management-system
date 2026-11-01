@@ -240,5 +240,28 @@ test(
     false
 );
 
+// 16. Declined offer allowed when previous placement disallowed
+test(
+    "Declined offer allowed when previous placement disallowed",
+    { selection: { id: 1, status: "OFFER_DECLINED" } },
+    { allowPreviousPlacement: false },
+    true
+);
+
+// 17. Null maximumBacklogs imposes no backlog restriction
+test(
+    "Null maximumBacklogs imposes no backlog restriction",
+    { activeBacklogs: 4 },
+    { maximumBacklogs: null },
+    true
+);
+
+// 18. Missing criteria rejects student
+{
+    const missingRes = evaluateStudentEligibility(baseStudent, null, eligibleBranches, eligibleYears);
+    assert.equal(missingRes.isEligible, false);
+    assert.ok(missingRes.reasons.includes("Eligibility criteria have not been configured for this drive."));
+    console.log("PASS: Missing criteria rejects student");
+}
 
 console.log("\nEligibility tests completed.");
