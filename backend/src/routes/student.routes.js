@@ -1,3 +1,4 @@
+
 const express = require("express");
 const router = express.Router();
 
@@ -11,6 +12,7 @@ const {
     updateStudent,
     updateStudentAccountStatus,
 } = require("../controllers/student.controller");
+const { getMySelection } = require("../controllers/selection.controller");
 
 const authenticate = require("../middleware/auth.middleware");
 const authorizeRole = require("../middleware/role.middleware");
@@ -22,6 +24,7 @@ router.use(authenticate);
 router.get("/me", authorizeRole("STUDENT"), getMyProfile);
 router.get("/me/drives", authorizeRole("STUDENT"), getMyDrives);
 router.get("/me/placements", authorizeRole("STUDENT"), getMyPlacements);
+router.get("/me/selection", authorizeRole("STUDENT"), getMySelection);
 
 // TPO-only routes.
 router.post("/", authorizeRole("TPO"), createStudent);

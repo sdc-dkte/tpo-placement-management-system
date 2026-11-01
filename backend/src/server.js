@@ -19,7 +19,7 @@ const driveRoutes = require("./routes/drive.routes");
 const eligibilityRoutes = require("./routes/eligibility.routes");
 
 // const participationRoutes = require("./routes/participation.routes");
-// const selectionRoutes = require("./routes/selection.routes");
+const selectionRoutes = require("./routes/selection.routes");
 // const placementRoutes = require("./routes/placement.routes");
 const dashboardRoutes = require("./routes/dashboard.routes");
 const reportRoutes = require("./routes/report.routes");
@@ -75,7 +75,7 @@ app.use("/api/v1/drives", driveRoutes);
 app.use("/api/v1/eligibility", eligibilityRoutes);
 
 // app.use("/api/v1/participation", participationRoutes);
-// app.use("/api/v1/selections", selectionRoutes);
+app.use("/api/v1/selections", selectionRoutes);
 // app.use("/api/v1/placements", placementRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/reports", reportRoutes);
