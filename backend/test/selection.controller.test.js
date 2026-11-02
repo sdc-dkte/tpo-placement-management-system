@@ -118,7 +118,7 @@ const seedSelection = (studentId, driveId, status = "SELECTED", packageLPA = 10,
   db.tables.studentSelection.push(row);
   return row;
 };
-const quietly = async fn => { const original = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = original; } };
+const quietly = async fn => { const original = console.error; console.error = () => { }; try { return await fn(); } finally { console.error = original; } };
 
 // ------------------------------------------------------------------ 15. route registration
 test("route registration: the five V1 selection endpoints exist exactly once with the right roles", () => {
@@ -168,12 +168,23 @@ test("the excluded Prisma models are still declared in the schema (found next to
   assert.match(schema, /model PlacementStatusHistory \{/);
 });
 
-test("the controller only imports names that eligibility.service.js really exports", () => {
-  const service = require(path.join(srcDir, "services/eligibility.service"));
-  const source = fs.readFileSync(path.join(srcDir, "controllers/selection.controller.js"), "utf8");
-  const imported = source.match(/const \{([^}]+)\} = require\("\.\.\/services\/eligibility\.service"\)/)[1].split(",").map(name => name.trim());
-  assert.ok(imported.length > 0);
-  for (const name of imported) assert.equal(typeof service[name], "function", `eligibility.service.js does not export ${name}()`);
+test("selection controller imports createOfficialSelection from selection.service", () => {
+  const service = require(path.join(srcDir, "services/selection.service"));
+  const source = fs.readFileSync(
+    path.join(srcDir, "controllers/selection.controller.js"),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /const \{ createOfficialSelection \} = require\("\.\.\/services\/selection\.service"\)/
+  );
+
+  assert.equal(
+    typeof service.createOfficialSelection,
+    "function",
+    "selection.service.js must export createOfficialSelection()"
+  );
 });
 
 // ------------------------------------------------------------------ 3. authorization
@@ -319,7 +330,23 @@ test("the rule engine's inputs are read INSIDE the transaction, with the relatio
   assert.equal(studentRead.args.include.selection, true);
   assert.deepEqual(studentRead.args.include.user, { select: { isActive: true } }, "the account status is re-checked inside the transaction");
   assert.equal(studentRead.args.select, undefined, "a select would drop the scalar fields the rule engine reads");
-  assert.deepEqual(driveRead.args.include, { eligibilityCriteria: true, eligibleBranches: true, eligibleYears: true });
+  assert.deepEqual(driveRead.args.include, {
+    company: {
+      select: {
+        id: true,
+        isActive: true,
+      },
+    },
+    jobRole: {
+      select: {
+        id: true,
+        companyId: true,
+      },
+    },
+    eligibilityCriteria: true,
+    eligibleBranches: true,
+    eligibleYears: true,
+  });
 });
 
 test("an ineligible result from the rule engine is honoured: 422 NOT_ELIGIBLE carries exactly the engine's reasons", async () => {
@@ -592,13 +619,13 @@ test("REAL POSTGRES: 8 simultaneous POST /selections for one student -> exactly 
     assert.equal(inactive.body.error.code, "STUDENT_INACTIVE");
     assert.equal(await real.studentSelection.count({ where: { studentId: created.studentB.id } }), 0);
   } finally {
-    await real.studentSelection.deleteMany({ where: { driveId: created.drive?.id ?? -1 } }).catch(() => {});
-    if (created.drive) await real.placementDrive.delete({ where: { id: created.drive.id } }).catch(() => {});
-    if (created.jobRole) await real.jobRole.delete({ where: { id: created.jobRole.id } }).catch(() => {});
-    if (created.company) await real.company.delete({ where: { id: created.company.id } }).catch(() => {});
-    for (const s of [created.studentA, created.studentB]) if (s) await real.student.delete({ where: { id: s.id } }).catch(() => {});
-    for (const u of [created.userA, created.userB, created.tpo]) if (u) await real.user.delete({ where: { id: u.id } }).catch(() => {});
-    if (created.department) await real.department.delete({ where: { id: created.department.id } }).catch(() => {});
+    await real.studentSelection.deleteMany({ where: { driveId: created.drive?.id ?? -1 } }).catch(() => { });
+    if (created.drive) await real.placementDrive.delete({ where: { id: created.drive.id } }).catch(() => { });
+    if (created.jobRole) await real.jobRole.delete({ where: { id: created.jobRole.id } }).catch(() => { });
+    if (created.company) await real.company.delete({ where: { id: created.company.id } }).catch(() => { });
+    for (const s of [created.studentA, created.studentB]) if (s) await real.student.delete({ where: { id: s.id } }).catch(() => { });
+    for (const u of [created.userA, created.userB, created.tpo]) if (u) await real.user.delete({ where: { id: u.id } }).catch(() => { });
+    if (created.department) await real.department.delete({ where: { id: created.department.id } }).catch(() => { });
     await real.$disconnect();
   }
 });

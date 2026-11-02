@@ -1,9 +1,15 @@
+
 const express = require("express");
 const router = express.Router();
+
 const auth = require("../middleware/auth.middleware");
 const allowRoles = require("../middleware/role.middleware");
 const c = require("../controllers/selection.controller");
 
+// Bulk selection — TPO only
+router.post("/bulk", auth, allowRoles("TPO"), c.bulkCreateSelections);
+
+// Existing routes — unchanged
 router.post("/", auth, allowRoles("TPO"), c.createSelection);
 router.get("/", auth, allowRoles("TPO"), c.listSelections);
 router.get("/:selectionId", auth, allowRoles("TPO"), c.getSelection);
