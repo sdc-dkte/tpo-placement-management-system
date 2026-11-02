@@ -173,24 +173,32 @@ const createStudent = async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(PRN.trim(), 12);
-
         const student = await prisma.$transaction(async (tx) => {
             return tx.student.create({
                 data: {
                     PRN: normalizedPRN,
-                    departmentId,
+
+                    department: {
+                        connect: {
+                            id: departmentId
+                        }
+                    },
+
                     graduationYear,
                     academicPathway,
                     CGPA: CGPA ?? null,
                     tenthPercentage: tenthPercentage ?? null,
+
                     twelfthPercentage:
                         academicPathway === "HSC"
                             ? twelfthPercentage
                             : null,
+
                     diplomaPercentage:
                         academicPathway === "DIPLOMA"
                             ? diplomaPercentage
                             : null,
+
                     activeBacklogs: activeBacklogs ?? 0,
 
                     user: {
@@ -200,9 +208,10 @@ const createStudent = async (req, res) => {
                             passwordHash,
                             role: "STUDENT",
                             mustChangePassword: true
-                        },
-                    },
+                        }
+                    }
                 },
+
                 select: {
                     id: true,
                     PRN: true,
@@ -214,6 +223,7 @@ const createStudent = async (req, res) => {
                     twelfthPercentage: true,
                     diplomaPercentage: true,
                     activeBacklogs: true,
+
                     user: {
                         select: {
                             id: true,
@@ -221,9 +231,9 @@ const createStudent = async (req, res) => {
                             email: true,
                             role: true,
                             mustChangePassword: true
-                        },
-                    },
-                },
+                        }
+                    }
+                }
             });
         });
 
