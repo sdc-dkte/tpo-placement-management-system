@@ -1,5 +1,5 @@
 const prisma = require("../prismaClient");
-const { evaluateStudentEligibility } = require("../services/eligibility.service");
+const { createOfficialSelection } = require("../services/selection.service");
 
 // V1 is a direct-selection workflow: the TPO verifies the outcome outside the portal and records it here.
 // Nothing in this file reads or writes DriveParticipation or PlacementStatusHistory.
@@ -25,61 +25,323 @@ const NEXT_OFFER_STATUSES = { SELECTED: ["OFFER_ACCEPTED", "OFFER_DECLINED"], OF
 const studentSummary = { id: true, PRN: true, graduationYear: true, user: { select: { name: true } }, department: { select: { id: true, name: true, code: true } } };
 
 const toSelectionSummary = selection => ({ selectionId: selection.id, studentId: selection.studentId, driveId: selection.driveId, status: selection.status, packageLPA: selection.packageLPA, selectedAt: selection.selectedAt });
-
 async function createSelection(req, res) {
-  const studentId = validId(req.body?.studentId) ? Number(req.body.studentId) : NaN;
-  const driveId = validId(req.body?.driveId) ? Number(req.body.driveId) : NaN;
-  // packageLPA is required. A missing, null or malformed value is rejected; the drive's package is never used as a fallback.
+  const studentId = validId(req.body?.studentId)
+    ? Number(req.body.studentId)
+    : NaN;
+
+  const driveId = validId(req.body?.driveId)
+    ? Number(req.body.driveId)
+    : NaN;
+
   const packageLPA = parsePackageLPA(req.body?.packageLPA);
-  if (!validId(studentId) || !validId(driveId)) return error(res, 400, "VALIDATION_ERROR", "studentId and driveId must be positive integers.");
-  if (packageLPA === null) return error(res, 400, "VALIDATION_ERROR", "packageLPA is required and must be a positive number.", [{ field: "packageLPA", message: "Send a number greater than 0, for example 12.5." }]);
+
+  if (!validId(studentId) || !validId(driveId)) {
+    return error(
+      res,
+      400,
+      "VALIDATION_ERROR",
+      "studentId and driveId must be positive integers."
+    );
+  }
+
+  if (packageLPA === null) {
+    return error(
+      res,
+      400,
+      "VALIDATION_ERROR",
+      "packageLPA is required and must be a positive number.",
+      [{ field: "packageLPA", message: "Send a number greater than 0, for example 12.5." }]
+    );
+  }
 
   try {
-    const [student, drive, existing] = await Promise.all([
-      prisma.student.findUnique({ where: { id: studentId }, select: { id: true, user: { select: { isActive: true } } } }),
-      prisma.placementDrive.findUnique({ where: { id: driveId }, include: { company: { select: { id: true, name: true, isActive: true } }, jobRole: { select: { id: true, title: true, companyId: true } } } }),
-      prisma.studentSelection.findUnique({ where: { studentId }, select: { id: true } }),
-    ]);
-    if (!student) return error(res, 404, "STUDENT_NOT_FOUND", "Student not found.");
-    if (!drive) return error(res, 404, "DRIVE_NOT_FOUND", "Placement drive not found.");
-    if (!student.user?.isActive) return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
-    if (existing) return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.", [{ field: "studentId", message: `Existing selectionId: ${existing.id}.` }]);
-    // Results are recorded after the recruitment process, so only a cancelled drive is an invalid target.
-    if (drive.status === "CANCELLED") return error(res, 422, "DRIVE_CLOSED", "Cannot create a selection for a cancelled drive.");
-    if (!drive.company?.isActive) return error(res, 422, "COMPANY_INACTIVE", "The drive's company is inactive.");
-    if (!drive.jobRole || drive.jobRole.companyId !== drive.companyId) return error(res, 422, "JOB_ROLE_COMPANY_MISMATCH", "The drive job role must belong to the same company as the drive.");
+    const [student, drive] = await Promise.all([
+      prisma.student.findUnique({
+        where: { id: studentId },
+        select: {
+          id: true,
+          user: { select: { isActive: true } },
+        },
+      }),
 
-    const created = await prisma.$transaction(async tx => {
-      // The unique studentId constraint is the final concurrency guard; this recheck only gives a clean message.
-      const duplicate = await tx.studentSelection.findUnique({ where: { studentId }, select: { id: true } });
-      if (duplicate) throw failWith("OFFICIAL_SELECTION_EXISTS");
-      // Eligibility is recalculated from the student, academic and drive rows read inside this transaction, using the
-      // shared rule engine. evaluateStudentEligibility is a pure function, so it works on transaction data (the service's
-      // checkStudentDriveEligibility wrapper always reads through the global client and cannot join a transaction).
-      const currentStudent = await tx.student.findUnique({ where: { id: studentId }, include: { selection: true, user: { select: { isActive: true } } } });
-      const currentDrive = await tx.placementDrive.findUnique({ where: { id: driveId }, include: { eligibilityCriteria: true, eligibleBranches: true, eligibleYears: true } });
-      if (!currentStudent || !currentDrive) throw failWith("P2025");
-      // Re-check the account status inside the transaction: the TPO could have deactivated the student after the first check.
-      if (!currentStudent.user?.isActive) throw failWith("STUDENT_INACTIVE");
-      const eligibility = evaluateStudentEligibility(
-        currentStudent,
-        currentDrive.eligibilityCriteria,
-        currentDrive.eligibleBranches.map(branch => branch.departmentId),
-        currentDrive.eligibleYears.map(year => year.graduationYear)
+      prisma.placementDrive.findUnique({
+        where: { id: driveId },
+        include: {
+          company: {
+            select: { id: true, name: true, isActive: true },
+          },
+          jobRole: {
+            select: { id: true, title: true, companyId: true },
+          },
+        },
+      }),
+    ]);
+
+    if (!student) {
+      return error(res, 404, "STUDENT_NOT_FOUND", "Student not found.");
+    }
+
+    if (!drive) {
+      return error(res, 404, "DRIVE_NOT_FOUND", "Placement drive not found.");
+    }
+
+    if (!student.user?.isActive) {
+      return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
+    }
+
+    if (drive.status === "CANCELLED") {
+      return error(res, 422, "DRIVE_CLOSED", "Cannot create a selection for a cancelled drive.");
+    }
+
+    if (!drive.company?.isActive) {
+      return error(res, 422, "COMPANY_INACTIVE", "The drive's company is inactive.");
+    }
+
+    if (!drive.jobRole || drive.jobRole.companyId !== drive.companyId) {
+      return error(
+        res,
+        422,
+        "JOB_ROLE_COMPANY_MISMATCH",
+        "The drive job role must belong to the same company as the drive."
       );
-      if (!eligibility.isEligible) throw failWith("NOT_ELIGIBLE", { reasons: eligibility.reasons });
-      return tx.studentSelection.create({ data: { studentId, driveId, status: "SELECTED", packageLPA } });
+    }
+
+    const created = await prisma.$transaction(tx =>
+      createOfficialSelection(tx, { studentId, driveId, packageLPA })
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Student selection recorded successfully",
+      data: toSelectionSummary(created),
     });
-    return res.status(201).json({ success: true, message: "Student selection recorded successfully", data: toSelectionSummary(created) });
   } catch (e) {
-    if (e.code === "P2002" || e.code === "OFFICIAL_SELECTION_EXISTS") return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.");
-    if (e.code === "STUDENT_INACTIVE") return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
-    if (e.code === "NOT_ELIGIBLE") return error(res, 422, "NOT_ELIGIBLE", "Student does not currently meet this drive's eligibility criteria.", e.reasons.map(reason => ({ field: "eligibility", message: reason })));
-    if (e.code === "P2003" || e.code === "P2025") return error(res, 404, "RELATED_RECORD_NOT_FOUND", "Student or drive was not found.");
+    if (e.code === "P2002" || e.code === "OFFICIAL_SELECTION_EXISTS") {
+      return error(res, 409, "OFFICIAL_SELECTION_EXISTS", "Student already has an official placement record.");
+    }
+
+    if (e.code === "STUDENT_INACTIVE") {
+      return error(res, 422, "STUDENT_INACTIVE", "Inactive students cannot be selected.");
+    }
+
+    if (e.code === "NOT_ELIGIBLE") {
+      return error(
+        res,
+        422,
+        "NOT_ELIGIBLE",
+        "Student does not currently meet this drive's eligibility criteria.",
+        (e.reasons || []).map(reason => ({
+          field: "eligibility",
+          message: reason,
+        }))
+      );
+    }
+
+    if (e.code === "P2003" || e.code === "P2025") {
+      return error(res, 404, "RELATED_RECORD_NOT_FOUND", "Student or drive was not found.");
+    }
+
+    if (e.code === "DRIVE_CLOSED") {
+      return error(res, 422, "DRIVE_CLOSED",
+        "Cannot create a selection for a cancelled drive.");
+    }
+
+    if (e.code === "COMPANY_INACTIVE") {
+      return error(res, 422, "COMPANY_INACTIVE",
+        "The drive's company is inactive.");
+    }
+
+    if (e.code === "JOB_ROLE_COMPANY_MISMATCH") {
+      return error(res, 422, "JOB_ROLE_COMPANY_MISMATCH",
+        "The drive job role must belong to the same company as the drive.");
+    }
+
     console.error("createSelection:", e);
     return error(res, 500, "INTERNAL_ERROR", "Failed to record selection.");
   }
 }
+
+
+const PRN_REGEX = /^\d{2}[A-Z]{3}\d{3}$/;
+const MAX_BULK_SIZE = 100;
+
+async function bulkCreateSelections(req, res) {
+  const driveId = validId(req.body?.driveId)
+    ? Number(req.body.driveId)
+    : NaN;
+
+  const packageLPA = parsePackageLPA(req.body?.packageLPA);
+  const prns = req.body?.prns;
+
+  // Request-level validation
+  if (!validId(driveId)) {
+    return error(res, 400, "VALIDATION_ERROR", "driveId must be a positive integer.");
+  }
+
+  if (packageLPA === null) {
+    return error(res, 400, "VALIDATION_ERROR", "packageLPA must be a positive number.");
+  }
+
+  if (!Array.isArray(prns) || prns.length === 0) {
+    return error(res, 400, "VALIDATION_ERROR", "prns must be a non-empty array.");
+  }
+
+  if (prns.length > MAX_BULK_SIZE) {
+    return error(res, 400, "VALIDATION_ERROR", `A maximum of ${MAX_BULK_SIZE} PRNs is allowed.`);
+  }
+
+  if (prns.some(prn => typeof prn !== "string")) {
+    return error(res, 400, "VALIDATION_ERROR", "Every PRN must be a string.");
+  }
+
+  try {
+    // Validate the common drive once before processing individual students.
+    const drive = await prisma.placementDrive.findUnique({
+      where: { id: driveId },
+      include: {
+        company: { select: { id: true, isActive: true } },
+        jobRole: { select: { id: true, companyId: true } },
+      },
+    });
+
+    if (!drive) {
+      return error(res, 404, "DRIVE_NOT_FOUND", "Placement drive not found.");
+    }
+
+    if (drive.status === "CANCELLED") {
+      return error(res, 422, "DRIVE_CLOSED", "Cannot create selections for a cancelled drive.");
+    }
+
+    if (!drive.company?.isActive) {
+      return error(res, 422, "COMPANY_INACTIVE", "The drive's company is inactive.");
+    }
+
+    if (!drive.jobRole || drive.jobRole.companyId !== drive.companyId) {
+      return error(res, 422, "JOB_ROLE_COMPANY_MISMATCH", "The drive job role must belong to the same company as the drive.");
+    }
+
+    const seenPRNs = new Set();
+    const results = [];
+
+    // Sequential processing avoids overwhelming the database.
+    for (const rawPRN of prns) {
+      const prn = rawPRN.trim().toUpperCase();
+
+      if (!PRN_REGEX.test(prn)) {
+        results.push({
+          prn: rawPRN,
+          status: "FAILED",
+          code: "INVALID_PRN_FORMAT",
+          message: "PRN must contain 2 digits, 3 uppercase letters and 3 digits.",
+        });
+        continue;
+      }
+
+      if (seenPRNs.has(prn)) {
+        results.push({
+          prn,
+          status: "SKIPPED",
+          code: "DUPLICATE_IN_REQUEST",
+          message: "This PRN has already appeared in the request.",
+        });
+        continue;
+      }
+
+      seenPRNs.add(prn);
+
+      try {
+        const student = await prisma.student.findUnique({
+          where: { PRN: prn },
+          select: { id: true },
+        });
+
+        if (!student) {
+          results.push({
+            prn,
+            status: "FAILED",
+            code: "STUDENT_NOT_FOUND",
+            message: "No student found for this PRN.",
+          });
+          continue;
+        }
+
+        const created = await prisma.$transaction(tx =>
+          createOfficialSelection(tx, {
+            studentId: student.id,
+            driveId,
+            packageLPA,
+          })
+        );
+
+        results.push({
+          prn,
+          status: "SUCCESS",
+          selectionId: created.id,
+        });
+      } catch (e) {
+        if (e.code === "P2002" || e.code === "OFFICIAL_SELECTION_EXISTS") {
+          results.push({
+            prn,
+            status: "SKIPPED",
+            code: "ALREADY_SELECTED",
+            message: "Student already has an official selection.",
+          });
+        } else if (e.code === "STUDENT_INACTIVE") {
+          results.push({
+            prn,
+            status: "FAILED",
+            code: "STUDENT_INACTIVE",
+            message: "Inactive students cannot be selected.",
+          });
+        } else if (e.code === "NOT_ELIGIBLE") {
+          results.push({
+            prn,
+            status: "FAILED",
+            code: "NOT_ELIGIBLE",
+            message: "Student does not meet the drive eligibility criteria.",
+            reasons: e.reasons || [],
+          });
+        } else if (e.code === "P2025" || e.code === "P2003") {
+          results.push({
+            prn,
+            status: "FAILED",
+            code: "RELATED_RECORD_NOT_FOUND",
+            message: "A related student or drive record was not found.",
+          });
+        } else {
+          console.error(`bulkCreateSelections (${prn}):`, e);
+          results.push({
+            prn,
+            status: "FAILED",
+            code: "INTERNAL_ERROR",
+            message: "Failed to record this student's selection.",
+          });
+        }
+      }
+    }
+
+    const successful = results.filter(r => r.status === "SUCCESS").length;
+    const failed = results.filter(r => r.status === "FAILED").length;
+    const skipped = results.filter(r => r.status === "SKIPPED").length;
+
+    return res.status(200).json({
+      success: true,
+      message: "Bulk selection processing completed.",
+      data: {
+        total: results.length,
+        successful,
+        failed,
+        skipped,
+        results,
+      },
+    });
+  } catch (e) {
+    console.error("bulkCreateSelections:", e);
+    return error(res, 500, "INTERNAL_ERROR", "Failed to process bulk selections.");
+  }
+}
+
 
 async function listSelections(req, res) {
   try {
@@ -211,4 +473,12 @@ async function getMySelection(req, res) {
   } catch (e) { console.error("getMySelection:", e); return error(res, 500, "INTERNAL_ERROR", "Failed to fetch selection."); }
 }
 
-module.exports = { createSelection, listSelections, getSelection, updateSelectionStatus, getMySelection };
+
+module.exports = {
+  createSelection,
+  bulkCreateSelections,
+  listSelections,
+  getSelection,
+  updateSelectionStatus,
+  getMySelection,
+};
