@@ -272,6 +272,7 @@ const getStudents = async (req, res) => {
             graduationYear,
             minCGPA,
             maxBacklogs,
+            status,
             sortOrder = "asc",
         } = req.query;
 
@@ -302,6 +303,49 @@ const getStudents = async (req, res) => {
         }
 
         const where = {};
+
+        // Validate placement status filter
+        if (
+            status !== undefined &&
+            !["PLACED", "UNPLACED"].includes(status)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Status must be PLACED or UNPLACED.",
+            });
+        }
+
+        // Filter students by placement status
+        if (status === "PLACED") {
+            where.selection = {
+                is: {
+                    status: {
+                        in: ["SELECTED", "OFFER_ACCEPTED"],
+                    },
+                },
+            };
+        }
+
+        if (status === "UNPLACED") {
+            where.AND = [
+                {
+                    OR: [
+                        {
+                            selection: {
+                                is: null,
+                            },
+                        },
+                        {
+                            selection: {
+                                is: {
+                                    status: "OFFER_DECLINED",
+                                },
+                            },
+                        },
+                    ],
+                },
+            ];
+        }
 
         // Search by PRN, name, or email
         if (search !== undefined) {
