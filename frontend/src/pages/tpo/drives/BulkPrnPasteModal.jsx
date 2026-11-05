@@ -7,6 +7,7 @@ import {
   Lock,
   FileText,
   Upload,
+  Loader2,
 } from "lucide-react";
 
 /**
@@ -28,6 +29,7 @@ export default function BulkPrnPasteModal({
   const [rawPrnInput, setRawPrnInput] = useState("");
   const [confirmedPackage, setConfirmedPackage] = useState("");
   const [attachedFileName, setAttachedFileName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef(null);
 
   // Sync native dialog
@@ -81,22 +83,31 @@ export default function BulkPrnPasteModal({
     }
   };
 
-  const handleConfirm = () => {
-    if (verifiedStudents.length === 0 && parsedPrns.length === 0) {
+  const handleConfirm = async () => {
+    if (parsedPrns.length === 0) {
       alert("Please enter or paste at least one candidate PRN.");
       return;
     }
 
     if (onConfirmPlacements) {
-      onConfirmPlacements({
-        students: verifiedStudents,
-        manualPrns: parsedPrns,
-        confirmedPackage,
-        attachedFileName,
-      });
+      try {
+        setIsSubmitting(true);
+        await onConfirmPlacements({
+          students: verifiedStudents,
+          manualPrns: parsedPrns,
+          confirmedPackage,
+          attachedFileName,
+        });
+        setRawPrnInput("");
+        onClose();
+      } catch (err) {
+        alert(err.message || "Failed to confirm placements.");
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      onClose();
     }
-
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -274,18 +285,26 @@ export default function BulkPrnPasteModal({
         <button
           type="button"
           onClick={onClose}
-          className="px-4 py-2 border border-[#E5E7EB] rounded text-xs font-semibold text-gray-600 hover:bg-slate-50 transition-colors"
+          disabled={isSubmitting}
+          className="px-4 py-2 border border-[#E5E7EB] rounded text-xs font-semibold text-gray-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={handleConfirm}
-          className="px-5 py-2.5 bg-[#FECC00] hover:bg-[#E5B800] text-[#111827] font-bold text-xs rounded flex items-center gap-1.5 shadow-sm transition-all duration-150 cursor-pointer"
+          disabled={isSubmitting || parsedPrns.length === 0}
+          className="px-5 py-2.5 bg-[#FECC00] hover:bg-[#E5B800] text-[#111827] font-bold text-xs rounded flex items-center gap-1.5 shadow-sm transition-all duration-150 cursor-pointer disabled:opacity-50"
         >
-          <Lock className="w-4 h-4 font-bold" />
+          {isSubmitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Lock className="w-4 h-4 font-bold" />
+          )}
           <span>
-            Confirm Placements &amp; Freeze Profiles ({parsedPrns.length} Students)
+            {isSubmitting
+              ? "Recording Official Selections..."
+              : `Confirm Placements & Freeze Profiles (${parsedPrns.length} Students)`}
           </span>
         </button>
       </div>

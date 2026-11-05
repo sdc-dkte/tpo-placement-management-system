@@ -18,6 +18,8 @@ import {
   getDriveByIdApi,
   getEligibleStudentsForDriveApi,
   updateDriveStatusApi,
+  bulkCreateSelectionsApi,
+  getDriveSelectionsApi,
 } from "../../../api/drives";
 import EmailOutreachCard from "./EmailOutreachCard";
 import CandidateRosterTable from "./CandidateRosterTable";
@@ -58,9 +60,10 @@ export default function TpoDriveDetailPage({ driveId: propDriveId, onBack }) {
       setIsLoading(true);
       setError(null);
       try {
-        const [driveRes, eligibleRes] = await Promise.all([
+        const [driveRes, eligibleRes, selectionsRes] = await Promise.all([
           getDriveByIdApi(driveId),
           getEligibleStudentsForDriveApi(driveId, { statusFilter: "eligible_only", limit: 100 }),
+          getDriveSelectionsApi(driveId).catch(() => ({ data: [] })),
         ]);
 
         if (isMounted) {
@@ -70,8 +73,20 @@ export default function TpoDriveDetailPage({ driveId: propDriveId, onBack }) {
           const students = eligibleRes.data || [];
           setEligibleStudents(students);
 
-          // If drive already has selections, extract them
-          if (driveData.selections && Array.isArray(driveData.selections)) {
+          // Populate placed candidates from live database selections
+          if (selectionsRes?.data && Array.isArray(selectionsRes.data)) {
+            setPlacedStudents(
+              selectionsRes.data.map((s) => ({
+                id: s.selectionId || s.id,
+                prn: s.PRN || s.prn,
+                name: s.studentName || s.name || s.user?.name,
+                department: s.department,
+                packageLPA: s.packageLPA,
+                confirmedPackage: s.packageLPA ? `₹${Number(s.packageLPA).toFixed(2)} LPA` : "Confirmed",
+                status: s.status,
+              }))
+            );
+          } else if (driveData.selections && Array.isArray(driveData.selections)) {
             setPlacedStudents(driveData.selections);
           }
         }
@@ -160,49 +175,74 @@ export default function TpoDriveDetailPage({ driveId: propDriveId, onBack }) {
     document.body.removeChild(link);
   };
 
-  // Handle Confirmed Placements from Bulk PRN Modal
-  const handleConfirmBulkPlacements = ({ students, manualPrns, confirmedPackage }) => {
-    const newPlaced = [];
+  // Handle Confirmed Placements from Bulk PRN Modal (Calls POST /api/v1/selections/bulk)
+  const handleConfirmBulkPlacements = async ({ manualPrns, confirmedPackage }) => {
+    // Extract numeric package (LPA)
+    const parsedPkg = parseFloat(String(confirmedPackage).replace(/[^\d.]/g, ""));
+    const packageLPA = !isNaN(parsedPkg) && parsedPkg > 0 ? parsedPkg : Number(drive?.packageLPA || 0);
 
-    // Verified students
-    students.forEach((s) => {
-      newPlaced.push({
-        id: s.id,
-        prn: s.PRN || s.prn,
-        name: s.name || s.user?.name,
-        department: s.department,
-        confirmedPackage,
-        status: "SELECTED",
-      });
+    if (!packageLPA || packageLPA <= 0) {
+      throw new Error("Please specify a valid CTC package greater than 0.");
+    }
+
+    if (!manualPrns || manualPrns.length === 0) {
+      throw new Error("Please enter or paste at least one candidate PRN.");
+    }
+
+    // Call official backend Bulk Selection API
+    const res = await bulkCreateSelectionsApi({
+      driveId: Number(drive.id),
+      packageLPA,
+      prns: manualPrns,
     });
 
-    // Any manual PRNs not in student object format
-    manualPrns.forEach((prn) => {
-      if (!newPlaced.some((p) => p.prn.toUpperCase() === prn.toUpperCase())) {
-        newPlaced.push({
-          id: `manual-${prn}`,
-          prn,
-          name: "Verified Candidate (Roster Match)",
-          department: { name: "Engineering", code: "ENG" },
-          confirmedPackage,
-          status: "SELECTED",
-        });
+    const summary = res.data || {};
+    const successful = summary.successful || 0;
+    const skipped = summary.skipped || 0;
+    const failed = summary.failed || 0;
+    const results = summary.results || [];
+
+    // Re-fetch selections and eligible students to synchronize state with DB
+    try {
+      const [updatedEligible, updatedSelections] = await Promise.all([
+        getEligibleStudentsForDriveApi(drive.id, { statusFilter: "eligible_only", limit: 100 }),
+        getDriveSelectionsApi(drive.id),
+      ]);
+
+      if (updatedEligible?.data) setEligibleStudents(updatedEligible.data);
+      if (updatedSelections?.data && Array.isArray(updatedSelections.data)) {
+        setPlacedStudents(
+          updatedSelections.data.map((s) => ({
+            id: s.selectionId || s.id,
+            prn: s.PRN || s.prn,
+            name: s.studentName || s.name || s.user?.name,
+            department: s.department,
+            packageLPA: s.packageLPA,
+            confirmedPackage: s.packageLPA ? `₹${Number(s.packageLPA).toFixed(2)} LPA` : "Confirmed",
+            status: s.status,
+          }))
+        );
       }
-    });
+    } catch (syncErr) {
+      console.warn("Could not reload drive rosters after bulk selection:", syncErr);
+    }
 
-    setPlacedStudents((prev) => {
-      const combined = [...prev];
-      newPlaced.forEach((p) => {
-        if (!combined.some((c) => (c.prn || c.PRN) === p.prn)) {
-          combined.push(p);
-        }
-      });
-      return combined;
-    });
+    // Build user-friendly feedback alert
+    const skippedDetails = results
+      .filter((r) => r.status === "SKIPPED")
+      .map((r) => `${r.prn} (${r.message || "Already selected"})`)
+      .join(", ");
+    const failedDetails = results
+      .filter((r) => r.status === "FAILED")
+      .map((r) => `${r.prn} (${r.message || "Error"})`)
+      .join(", ");
 
-    alert(
-      `✅ Placements Confirmed & Profiles Frozen!\n\n${newPlaced.length} students confirmed placed at ${confirmedPackage}.\nClause 4.2 Placement Freeze applied: These candidates are now locked from subsequent campus recruitment drives.`
-    );
+    let msg = `✅ Bulk Selection Completed!\n\n• Successfully Placed & Locked: ${successful} candidates\n• Skipped: ${skipped} candidates\n• Failed: ${failed} candidates`;
+    if (skippedDetails) msg += `\n\nSkipped Candidates:\n${skippedDetails}`;
+    if (failedDetails) msg += `\n\nFailed Candidates:\n${failedDetails}`;
+    msg += `\n\nClause 4.2 Placement Lockdown applied: Placed candidates are now frozen from future campus drives.`;
+
+    alert(msg);
   };
 
   if (isLoading) {

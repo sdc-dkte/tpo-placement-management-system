@@ -42,12 +42,14 @@ function mapBackendStudentToRoster(student) {
 
   const status = isPlaced ? "Placed" : isInReview ? "In Review" : "Unplaced";
 
-  // If student is placed but backend did not join company name, reflect that reality
+  // Use direct companyName and packageLPA returned by backend API
   const organization = isPlaced
-    ? student.selection?.company?.name || "Placed (Company not returned by API)"
+    ? student.companyName || student.selection?.company?.name || "Placed"
     : isInReview
     ? "Drive in Review"
     : "Open to Drives";
+
+  const packageLPA = student.packageLPA ?? student.selection?.packageLPA ?? null;
 
   return {
     id: student.id,
@@ -62,7 +64,7 @@ function mapBackendStudentToRoster(student) {
     status,
     rawPlacementStatus: student.placementStatus || "NOT_SELECTED",
     organization,
-    packageLPA: student.selection?.packageLPA ?? null,
+    packageLPA,
     academicPathway: student.academicPathway || "HSC",
     tenthPercentage: student.tenthPercentage ?? null,
     twelfthPercentage: student.twelfthPercentage ?? null,
@@ -178,6 +180,13 @@ export default function StudentDirectoryPage() {
         params.maxBacklogs = 0;
       }
 
+      // Backend supports ?status=PLACED or ?status=UNPLACED
+      if (statusFilter === "Placed") {
+        params.status = "PLACED";
+      } else if (statusFilter === "Unplaced") {
+        params.status = "UNPLACED";
+      }
+
       const res = await getStudentsApi(params);
 
       if (res?.data && Array.isArray(res.data)) {
@@ -193,11 +202,11 @@ export default function StudentDirectoryPage() {
 
         const rosterStudents = res.data.map(mapBackendStudentToRoster);
 
-        // Client-side filter for status and backlog states
+        // Client-side filter fallback for "In Review" (not an official DB placement status) and live backlogs
         let filtered =
-          statusFilter === "ALL"
-            ? rosterStudents
-            : rosterStudents.filter((s) => s.status === statusFilter);
+          statusFilter === "In Review"
+            ? rosterStudents.filter((s) => s.status === "In Review")
+            : rosterStudents;
 
         if (backlogFilter === "HAS_BACKLOGS") {
           filtered = filtered.filter((s) => s.backlogs > 0);

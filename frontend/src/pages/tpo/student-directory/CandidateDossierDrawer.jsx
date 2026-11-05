@@ -16,7 +16,12 @@ import {
   Printer,
   CheckCircle,
 } from "lucide-react";
-import { getStudentByIdApi } from "../../../api/students";
+import {
+  getStudentByIdApi,
+  getStudentDocumentsApi,
+  downloadStudentDocumentApi,
+  viewStudentDocumentApi,
+} from "../../../api/students";
 
 export default function CandidateDossierDrawer({
   student,
@@ -28,6 +33,9 @@ export default function CandidateDossierDrawer({
   const [dossierData, setDossierData] = useState(student);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [documents, setDocuments] = useState([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [downloadingDocId, setDownloadingDocId] = useState(null);
 
   // Sync internal state with incoming student prop
   useEffect(() => {
@@ -86,6 +94,38 @@ export default function CandidateDossierDrawer({
     }
   }, [isOpen, student]);
 
+  // Fetch live student documents from GET /api/v1/students/:studentId/documents
+  useEffect(() => {
+    if (!isOpen || !student?.id) {
+      setDocuments([]);
+      return;
+    }
+
+    let isCurrent = true;
+    setIsLoadingDocs(true);
+
+    getStudentDocumentsApi(student.id)
+      .then((res) => {
+        if (!isCurrent) return;
+        if (res?.documents && Array.isArray(res.documents)) {
+          setDocuments(res.documents);
+        } else {
+          setDocuments([]);
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not fetch candidate documents:", err.message);
+        if (isCurrent) setDocuments([]);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingDocs(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [isOpen, student?.id]);
+
   // Listen for ESC key
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -104,6 +144,28 @@ export default function CandidateDossierDrawer({
   };
 
   const studentDisplay = dossierData;
+
+  const handleDownloadDoc = async (doc) => {
+    try {
+      setDownloadingDocId(doc.id);
+      await downloadStudentDocumentApi(doc.id, doc.fileName);
+    } catch (err) {
+      alert(`Could not download document: ${err.message}`);
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
+  const handleViewDoc = async (doc) => {
+    try {
+      setDownloadingDocId(doc.id);
+      await viewStudentDocumentApi(doc.id);
+    } catch (err) {
+      alert(`Could not open document: ${err.message}`);
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
 
   const handleDownloadResume = async () => {
     try {
@@ -331,12 +393,17 @@ export default function CandidateDossierDrawer({
               )}
             </div>
 
-            {/* Candidate Documents (Resume & Marksheets) */}
+            {/* Candidate Documents (Resume, Marksheets, Transcripts) */}
             <div className="border border-[#E5E7EB] rounded p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
                   <FileText className="w-4 h-4 text-gray-600" />
                   <span>Candidate Documents</span>
+                  {documents.length > 0 && (
+                    <span className="font-mono text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-semibold">
+                      {documents.length}
+                    </span>
+                  )}
                 </div>
                 <span className="text-[11px] font-medium text-gray-500">
                   Verified Records
@@ -344,18 +411,96 @@ export default function CandidateDossierDrawer({
               </div>
 
               <div className="space-y-2">
-                {/* Resume Card */}
-                <div className="p-3 rounded bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs">
+                {isLoadingDocs ? (
+                  <div className="p-4 text-center text-xs text-gray-500 flex items-center justify-center gap-2 bg-slate-50 rounded border border-slate-200">
+                    <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+                    <span>Loading verified documents...</span>
+                  </div>
+                ) : documents.length > 0 ? (
+                  documents.map((doc) => {
+                    const isDownloadingThis = downloadingDocId === doc.id;
+                    const docTypeLabel =
+                      doc.documentType === "RESUME"
+                        ? "Resume"
+                        : doc.documentType === "TRANSCRIPT"
+                        ? "Transcript"
+                        : doc.documentType === "CERTIFICATE"
+                        ? "Certificate"
+                        : "Document";
+
+                    return (
+                      <div
+                        key={doc.id}
+                        className="p-3 rounded bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900 truncate" title={doc.fileName}>
+                              {doc.fileName}
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5">
+                              <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 font-medium text-[10px]">
+                                {docTypeLabel}
+                              </span>
+                              {doc.uploadedAt && (
+                                <span className="tabular-nums">
+                                  {new Date(doc.uploadedAt).toLocaleDateString("en-IN")}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleViewDoc(doc)}
+                            disabled={isDownloadingThis}
+                            title="View document in new tab"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>View</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadDoc(doc)}
+                            disabled={isDownloadingThis}
+                            title="Download document"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-dkte-gold hover:bg-dkte-gold-hover text-[#111827] text-xs font-bold transition shadow-2xs cursor-pointer active:scale-[0.98] disabled:opacity-50"
+                          >
+                            {isDownloadingThis ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Download className="w-3.5 h-3.5" />
+                            )}
+                            <span>Download</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-2.5 bg-slate-50 border border-dashed border-slate-300 rounded text-center text-[11px] text-gray-500">
+                    No student-uploaded files found in registry.
+                  </div>
+                )}
+
+                {/* Always-available Official Institutional Placement Dossier */}
+                <div className="p-3 rounded bg-amber-50/40 border border-amber-200/80 flex items-center justify-between gap-3 text-xs mt-2">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
-                      <FileText className="w-4 h-4" />
+                    <div className="w-8 h-8 rounded bg-amber-100 text-amber-800 flex items-center justify-center flex-shrink-0 font-bold text-xs">
+                      DKTE
                     </div>
                     <div className="min-w-0">
                       <div className="font-semibold text-gray-900 truncate">
-                        {studentDisplay.prn}_Resume.pdf
+                        {studentDisplay.prn}_Placement_Dossier
                       </div>
-                      <div className="text-[11px] text-gray-500">
-                        Primary Placement Resume
+                      <div className="text-[11px] text-amber-900">
+                        Official Verified Placement Summary
                       </div>
                     </div>
                   </div>
@@ -368,7 +513,7 @@ export default function CandidateDossierDrawer({
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 text-xs font-semibold transition cursor-pointer"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>View</span>
+                      <span>Preview</span>
                     </button>
                     <button
                       type="button"
@@ -377,7 +522,7 @@ export default function CandidateDossierDrawer({
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-dkte-gold hover:bg-dkte-gold-hover text-[#111827] text-xs font-bold transition shadow-2xs cursor-pointer active:scale-[0.98]"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>Download</span>
+                      <span>Export</span>
                     </button>
                   </div>
                 </div>

@@ -211,3 +211,31 @@ export async function createJobRoleQuickApi(companyId, roleData) {
 export async function getDepartmentsForSelectApi() {
   return apiClient("/departments?limit=50");
 }
+
+/**
+ * Bulk create official student selections for a placement drive (Clause 4.2 Lockdown).
+ * Matches backend: POST /api/v1/selections/bulk
+ * @param {Object} payload
+ * @param {number} payload.driveId
+ * @param {number} payload.packageLPA
+ * @param {string[]} payload.prns
+ */
+export async function bulkCreateSelectionsApi({ driveId, packageLPA, prns }) {
+  return apiClient("/selections/bulk", {
+    method: "POST",
+    body: {
+      driveId: Number(driveId),
+      packageLPA: Number(packageLPA),
+      prns,
+    },
+  });
+}
+
+/**
+ * Fetch official student selections for a placement drive.
+ * Matches backend: GET /api/v1/selections?driveId=...
+ */
+export async function getDriveSelectionsApi(driveId) {
+  return apiClient(`/selections?driveId=${driveId}&limit=100`);
+}
+
