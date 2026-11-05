@@ -1,0 +1,19 @@
+PRN,name,email,departmentCode,graduationYear,academicPathway,CGPA,tenthPercentage,twelfthPercentage,diplomaPercentage,activeBacklogs
+22CS001,Aarav Sharma,aarav.sharma@dkte.ac.in,CSE,2026,HSC,9.45,94.20,91.80,,0
+22CS002,Ananya Patil,ananya.patil@dkte.ac.in,CSE,2026,HSC,8.92,89.50,87.00,,0
+22CS003,Rohan Deshmukh,rohan.deshmukh@dkte.ac.in,CSE,2026,DIPLOMA,8.35,84.00,,86.40,0
+22AL001,Siddharth Joshi,siddharth.joshi@dkte.ac.in,AIML,2026,HSC,8.75,88.00,85.40,,0
+22AL002,Shruti Shinde,shruti.shinde@dkte.ac.in,AIML,2026,HSC,9.10,92.00,90.20,,0
+22AL003,Karan Kulkarni,karan.kulkarni@dkte.ac.in,AIML,2026,DIPLOMA,7.80,78.50,,81.20,1
+22AD001,Pooja Hegde,pooja.hegde@dkte.ac.in,AIDS,2026,HSC,9.15,91.00,89.20,,0
+22AD002,Aditya More,aditya.more@dkte.ac.in,AIDS,2026,HSC,6.85,74.00,71.50,,1
+22AD003,Neha Kadam,neha.kadam@dkte.ac.in,AIDS,2026,DIPLOMA,8.30,82.40,,85.00,0
+22ET001,Vikram Shinde,vikram.shinde@dkte.ac.in,ENTC,2026,DIPLOMA,8.10,82.00,,84.50,0
+22ET002,Sneha Jadhav,sneha.jadhav@dkte.ac.in,ENTC,2026,HSC,7.65,80.00,76.50,,0
+22ET003,Omkar Mane,omkar.mane@dkte.ac.in,ENTC,2026,HSC,7.20,76.00,72.40,,0
+22ME001,Pratiksha Kulkarni,pratiksha.kulkarni@dkte.ac.in,MECH,2026,HSC,7.95,88.00,82.40,,0
+22ME002,Sourabh Chougule,sourabh.c@dkte.ac.in,MECH,2026,DIPLOMA,8.40,81.00,,86.00,0
+22ME003,Tejas Powar,tejas.powar@dkte.ac.in,MECH,2026,HSC,6.90,72.50,68.00,,2
+22CV001,Digvijay Powar,digvijay.powar@dkte.ac.in,CIVIL,2026,HSC,7.80,82.50,78.00,,0
+22CV002,Radhika Chougule,radhika.c@dkte.ac.in,CIVIL,2026,HSC,8.50,86.00,83.50,,0
+22CV003,Vinayak Kamble,vinayak.kamble@dkte.ac.in,CIVIL,2026,DIPLOMA,7.40,75.00,,79.80,0

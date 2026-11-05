@@ -303,6 +303,13 @@ const getStudents = async (req, res) => {
         }
 
         const where = {};
+        if (req.query.includeInactive !== "true") {
+            where.user = {
+                is: {
+                    isActive: true,
+                },
+            };
+        }
 
         // Validate placement status filter
         if (
@@ -505,6 +512,7 @@ const getStudents = async (req, res) => {
                         select: {
                             name: true,
                             email: true,
+                            isActive: true,
                         },
                     },
                     department: {
