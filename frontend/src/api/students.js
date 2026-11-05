@@ -26,6 +26,9 @@ export async function getStudentsApi(params = {}) {
   if (params.maxBacklogs !== undefined) {
     query.append("maxBacklogs", params.maxBacklogs);
   }
+  if (params.status && ["PLACED", "UNPLACED"].includes(params.status)) {
+    query.append("status", params.status);
+  }
   if (params.sortOrder) query.append("sortOrder", params.sortOrder);
 
   const queryString = query.toString();
@@ -139,3 +142,77 @@ export async function updateStudentStatusApi(studentId, isActive = false) {
     body: { isActive },
   });
 }
+
+/**
+ * Remove/Deactivate student from placement roster.
+ */
+export async function deleteStudentApi(studentId) {
+  return updateStudentStatusApi(studentId, false);
+}
+
+/**
+ * Bulk remove/deactivate candidates from placement roster.
+ */
+export async function bulkDeleteStudentsApi(studentIds = []) {
+  return Promise.all(studentIds.map((id) => updateStudentStatusApi(id, false)));
+}
+
+/**
+ * Fetch verified documents uploaded by or for a student.
+ * Matches backend: GET /api/v1/students/:studentId/documents
+ */
+export async function getStudentDocumentsApi(studentId) {
+  return apiClient(`/students/${studentId}/documents`);
+}
+
+/**
+ * Download a verified candidate document with authentication.
+ * Matches backend: GET /api/v1/documents/:documentId/download
+ */
+export async function downloadStudentDocumentApi(documentId, fileName) {
+  const token = localStorage.getItem("tpo_auth_token");
+  const response = await fetch(`/api/v1/documents/${documentId}/download`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(errorData?.message || `Failed to download document (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName || `document-${documentId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * View a student document in a new browser tab with authentication.
+ * Matches backend: GET /api/v1/documents/:documentId/download
+ */
+export async function viewStudentDocumentApi(documentId) {
+  const token = localStorage.getItem("tpo_auth_token");
+  const response = await fetch(`/api/v1/documents/${documentId}/download`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(errorData?.message || `Failed to open document (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const contentType = response.headers.get("content-type") || "application/pdf";
+  const blobUrl = URL.createObjectURL(new Blob([blob], { type: contentType }));
+  window.open(blobUrl, "_blank");
+}
+
