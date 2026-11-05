@@ -11,6 +11,8 @@ import StudentDirectoryPage from './pages/tpo/student-directory/StudentDirectory
 import TpoAnalyticsPage from './pages/tpo/TpoAnalyticsPage';
 import StudentDossierPage from './pages/student/StudentDossierPage';
 import StudentDrivesPage from './pages/student/StudentDrivesPage';
+import StudentGuidePage from './pages/student/StudentGuidePage';
+import StudentLayout from './pages/student/StudentLayout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import PublicOnlyRoute from './components/auth/PublicOnlyRoute';
 
@@ -54,10 +56,14 @@ export default function App() {
               </Route>
             </Route>
 
-            {/* Student Read-Only Portal (Student Only) */}
+            {/* Student Portal (Student Only) */}
             <Route element={<ProtectedRoute allowedRoles={['STUDENT']} />}>
-              <Route path="/portal/dossier" element={<StudentDossierPage />} />
-              <Route path="/portal/drives" element={<StudentDrivesPage />} />
+              <Route element={<StudentLayout />}>
+                <Route path="/portal/dossier" element={<StudentDossierPage />} />
+                <Route path="/portal/drives" element={<StudentDrivesPage />} />
+                <Route path="/portal/guide" element={<StudentGuidePage />} />
+                <Route path="/portal" element={<Navigate to="/portal/dossier" replace />} />
+              </Route>
             </Route>
           </Route>
 
