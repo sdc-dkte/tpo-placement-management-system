@@ -518,6 +518,16 @@ const getStudents = async (req, res) => {
                     selection: {
                         select: {
                             status: true,
+                            packageLPA: true,
+                            drive: {
+                                select: {
+                                    company: {
+                                        select: {
+                                            name: true,
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -534,6 +544,12 @@ const getStudents = async (req, res) => {
                 placementStatus: selection
                     ? selection.status
                     : "NOT_SELECTED",
+                packageLPA: selection
+                    ? selection.packageLPA
+                    : null,
+                companyName: selection
+                    ? selection.drive.company.name
+                    : null,
             };
         });
 
