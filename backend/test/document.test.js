@@ -34,7 +34,20 @@ const state = {
 const getDocument = (id) =>
     state.documents ? state.documents.get(id) : state.document;
 
+const userRolesById = new Map();
+
 const prisma = {
+    user: {
+        findUnique: async ({ where }) => {
+            const role = userRolesById.get(where?.id) || "STUDENT";
+            return {
+                id: where?.id || 10,
+                role,
+                isActive: true,
+                mustChangePassword: false,
+            };
+        },
+    },
     student: {
         findUnique: async () => state.student,
     },
@@ -111,8 +124,10 @@ app.use((error, req, res, next) => {
 let server;
 let baseUrl;
 
-const makeToken = (role, id = 10) =>
-    jwt.sign({ id, role }, process.env.JWT_SECRET);
+const makeToken = (role, id = 10) => {
+    userRolesById.set(id, role);
+    return jwt.sign({ id, role }, process.env.JWT_SECRET);
+};
 
 const authorization = (role, id) => ({
     Authorization: `Bearer ${makeToken(role, id)}`,

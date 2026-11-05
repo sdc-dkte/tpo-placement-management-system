@@ -55,10 +55,30 @@ export default function CandidateDossierDrawer({
           if (!isCurrent) return;
           if (res?.data) {
             const apiStudent = res.data;
-            const isPlaced =
-              apiStudent.placementStatus === "SELECTED" ||
-              apiStudent.placementStatus === "OFFER_ACCEPTED" ||
-              apiStudent.selection?.status === "SELECTED";
+            const rawStatus =
+              apiStudent.placementStatus ||
+              apiStudent.selection?.status ||
+              "NOT_SELECTED";
+
+            const companyName =
+              apiStudent.companyName ||
+              apiStudent.selection?.drive?.company?.name ||
+              apiStudent.selection?.company?.name ||
+              null;
+
+            const packageLPA =
+              apiStudent.packageLPA ??
+              apiStudent.selection?.packageLPA ??
+              null;
+
+            let status = "Unplaced";
+            if (rawStatus === "OFFER_ACCEPTED") {
+              status = "Placed / Confirmed";
+            } else if (rawStatus === "SELECTED") {
+              status = "Selected";
+            } else if (rawStatus === "OFFER_DECLINED") {
+              status = "Offer Declined";
+            }
 
             setDossierData((prev) => ({
               ...prev,
@@ -75,9 +95,10 @@ export default function CandidateDossierDrawer({
               twelfthPercentage: apiStudent.twelfthPercentage ?? prev.twelfthPercentage,
               diplomaPercentage: apiStudent.diplomaPercentage ?? prev.diplomaPercentage,
               graduationYear: apiStudent.graduationYear || prev.graduationYear,
-              status: isPlaced ? "Placed" : prev.status || "Unplaced",
-              organization: apiStudent.selection?.company?.name || prev.organization,
-              packageLPA: apiStudent.selection?.packageLPA ?? prev.packageLPA,
+              status: status !== "Unplaced" ? status : prev.status || "Unplaced",
+              rawPlacementStatus: rawStatus,
+              organization: companyName || prev.organization,
+              packageLPA: packageLPA ?? prev.packageLPA,
             }));
           }
         })
@@ -353,41 +374,87 @@ export default function CandidateDossierDrawer({
 
             {/* Current Placement Outcome */}
             <div className="border border-[#E5E7EB] rounded p-4 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
-                <Award className="w-4 h-4 text-gray-600" />
-                <span>Placement Outcome</span>
+              <div className="flex items-center justify-between text-xs font-bold text-gray-900 uppercase tracking-wider pb-1 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-gray-600" />
+                  <span>Placement Outcome</span>
+                </div>
+                <span
+                  className={`font-semibold text-[11px] px-2.5 py-0.5 rounded-full ${
+                    studentDisplay.status === "Placed / Confirmed" ||
+                    studentDisplay.status === "Placed" ||
+                    studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED"
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      : studentDisplay.status === "Selected" ||
+                        studentDisplay.rawPlacementStatus === "SELECTED"
+                      ? "bg-blue-50 text-blue-800 border border-blue-200"
+                      : studentDisplay.status === "Offer Declined" ||
+                        studentDisplay.rawPlacementStatus === "OFFER_DECLINED"
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : "bg-slate-100 text-slate-700 border border-slate-200"
+                  }`}
+                >
+                  {studentDisplay.status}
+                </span>
               </div>
 
-              {studentDisplay.status === "Placed" ? (
+              {studentDisplay.status === "Placed / Confirmed" ||
+              studentDisplay.status === "Placed" ||
+              studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED" ? (
                 <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-950">
                       Offer Confirmed
                     </span>
-                    <span className="text-xs font-bold text-emerald-800 tabular-nums bg-emerald-100/80 px-2 py-0.5 rounded">
-                      ₹{Number(studentDisplay.packageLPA || 0).toFixed(2)} LPA
-                    </span>
+                    {studentDisplay.packageLPA && (
+                      <span className="text-xs font-bold font-mono text-emerald-800 tabular-nums bg-emerald-100/80 px-2 py-0.5 rounded">
+                        ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm font-semibold text-gray-900">
-                    {studentDisplay.organization || "Selected Candidate"}
+                    {studentDisplay.organization || "Corporate Partner"}
                   </div>
-                  <div className="text-[11px] text-emerald-800">
-                    Official offer letter verified by TPO Office.
+                  <div className="text-[11px] text-emerald-900 leading-relaxed font-medium">
+                    Institutional Clause 4.2 Placement Lockdown Active: Candidate has officially accepted this appointment.
                   </div>
                 </div>
-              ) : studentDisplay.status === "In Review" ? (
+              ) : studentDisplay.status === "Selected" ||
+                studentDisplay.rawPlacementStatus === "SELECTED" ? (
+                <div className="p-3 bg-blue-50/60 border border-blue-200 rounded space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-950">
+                      Selection Pending Confirmation
+                    </span>
+                    {studentDisplay.packageLPA && (
+                      <span className="text-xs font-bold font-mono text-blue-800 tabular-nums bg-blue-100/80 px-2 py-0.5 rounded">
+                        ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {studentDisplay.organization || "Corporate Partner"}
+                  </div>
+                  <div className="text-[11px] text-blue-900 leading-relaxed">
+                    Selected by recruiter; placement pending student offer acceptance. Clause 4.2 profile lock is NOT active until confirmed.
+                  </div>
+                </div>
+              ) : studentDisplay.status === "Offer Declined" ||
+                studentDisplay.rawPlacementStatus === "OFFER_DECLINED" ? (
                 <div className="p-3 bg-amber-50/60 border border-amber-200 rounded space-y-1.5">
-                  <div className="text-xs font-bold text-amber-950">Recruitment In Progress</div>
-                  <div className="text-sm font-semibold text-gray-900">{studentDisplay.organization}</div>
-                  <div className="text-[11px] text-amber-800">
-                    Active interview / evaluation stage in current campus drive.
+                  <div className="text-xs font-bold text-amber-950">Offer Declined</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {studentDisplay.organization || "Corporate Partner"}
+                  </div>
+                  <div className="text-[11px] text-amber-900 leading-relaxed">
+                    Candidate declined offer. Profile remains active and unreserved for upcoming campus drives.
                   </div>
                 </div>
               ) : (
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded text-center">
-                  <div className="text-xs font-semibold text-gray-700">Open to Recruitment Drives</div>
-                  <div className="text-[11px] text-gray-500 mt-1">
-                    Eligible for upcoming recruitment notifications matching criteria.
+                  <div className="text-xs font-semibold text-gray-800">Not Placed</div>
+                  <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                    Currently not placed with an official corporate partner. Eligible for upcoming recruitment drives matching academic cutoffs.
                   </div>
                 </div>
               )}
@@ -703,36 +770,111 @@ export default function CandidateDossierDrawer({
               </div>
 
               {/* Placement Status Card */}
-              <div className="bg-white border border-slate-200 rounded p-4 space-y-2">
-                <div className="font-bold text-gray-900 text-[11px] uppercase tracking-wider pb-1 border-b border-gray-100 flex items-center justify-between">
-                  <span>Recruitment & Offer Details</span>
-                  <span className={`font-semibold text-[11px] px-2 py-0.5 rounded-full ${
-                    studentDisplay.status === "Placed"
-                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                      : "bg-slate-100 text-slate-700 border border-slate-200"
-                  }`}>
+              <div className="bg-white border border-slate-200 rounded p-4 space-y-3">
+                <div className="font-bold text-gray-900 text-[11px] uppercase tracking-wider pb-1.5 border-b border-gray-100 flex items-center justify-between">
+                  <span>Recruitment & Placement Status</span>
+                  <span
+                    className={`font-semibold text-[11px] px-2.5 py-0.5 rounded-full ${
+                      studentDisplay.status === "Placed / Confirmed" ||
+                      studentDisplay.status === "Placed" ||
+                      studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED"
+                        ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                        : studentDisplay.status === "Selected" ||
+                          studentDisplay.rawPlacementStatus === "SELECTED"
+                        ? "bg-blue-50 text-blue-800 border border-blue-200"
+                        : studentDisplay.status === "Offer Declined" ||
+                          studentDisplay.rawPlacementStatus === "OFFER_DECLINED"
+                        ? "bg-amber-50 text-amber-800 border border-amber-200"
+                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                    }`}
+                  >
                     {studentDisplay.status}
                   </span>
                 </div>
 
-                {studentDisplay.status === "Placed" ? (
-                  <div className="flex items-center justify-between pt-1">
-                    <div>
-                      <span className="text-[10px] text-gray-500 block">Recruiting Company</span>
-                      <span className="font-bold text-gray-900 text-sm">{studentDisplay.organization}</span>
-                    </div>
-                    {studentDisplay.packageLPA && (
-                      <div className="text-right">
-                        <span className="text-[10px] text-gray-500 block">Confirmed Compensation</span>
-                        <span className="font-mono font-bold text-emerald-700 text-sm tabular-nums">
-                          ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                {studentDisplay.status === "Placed / Confirmed" ||
+                studentDisplay.status === "Placed" ||
+                studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="text-[10px] text-gray-500 block uppercase tracking-wider font-semibold">
+                          Recruiting Company
+                        </span>
+                        <span className="font-bold text-gray-900 text-sm">
+                          {studentDisplay.organization || "Corporate Partner"}
                         </span>
                       </div>
-                    )}
+                      {studentDisplay.packageLPA && (
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-500 block uppercase tracking-wider font-semibold">
+                            Confirmed Package
+                          </span>
+                          <span className="font-mono font-bold text-emerald-700 text-sm tabular-nums">
+                            ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded bg-emerald-50/60 border border-emerald-200/80 text-[11px] text-emerald-900 leading-relaxed">
+                      <span className="font-semibold block">Institutional Clause 4.2 Placement Lockdown Active:</span>
+                      Candidate has officially accepted this appointment. Placement profile is locked for regular upcoming campus drives.
+                    </div>
+                  </div>
+                ) : studentDisplay.status === "Selected" ||
+                  studentDisplay.rawPlacementStatus === "SELECTED" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="text-[10px] text-gray-500 block uppercase tracking-wider font-semibold">
+                          Selecting Organization
+                        </span>
+                        <span className="font-bold text-gray-900 text-sm">
+                          {studentDisplay.organization || "Corporate Partner"}
+                        </span>
+                      </div>
+                      {studentDisplay.packageLPA && (
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-500 block uppercase tracking-wider font-semibold">
+                            Offered Package
+                          </span>
+                          <span className="font-mono font-bold text-blue-700 text-sm tabular-nums">
+                            ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2.5 rounded bg-blue-50/60 border border-blue-200/80 text-[11px] text-blue-900 leading-relaxed">
+                      <span className="font-semibold block">Selection Pending Formal Acceptance:</span>
+                      Candidate has been selected by recruiter; placement pending student offer acceptance. Clause 4.2 profile lock is NOT active until confirmed.
+                    </div>
+                  </div>
+                ) : studentDisplay.status === "Offer Declined" ||
+                  studentDisplay.rawPlacementStatus === "OFFER_DECLINED" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <span className="text-[10px] text-gray-500 block uppercase tracking-wider font-semibold">
+                          Recruiting Company
+                        </span>
+                        <span className="font-bold text-gray-900 text-sm">
+                          {studentDisplay.organization || "Corporate Partner"}
+                        </span>
+                      </div>
+                      <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                        Offer Declined
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded bg-amber-50/60 border border-amber-200/80 text-[11px] text-amber-900 leading-relaxed">
+                      Candidate declined offer. Profile remains unreserved for upcoming campus recruitment drives matching academic eligibility criteria.
+                    </div>
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-500 italic py-1">
-                    Candidate is actively participating in ongoing placement drives.
+                  <div className="text-xs text-gray-500 py-1 space-y-1">
+                    <p className="font-semibold text-gray-800">Not Placed</p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      Candidate currently has no active offers. Drive eligibility will be evaluated dynamically against each recruiter&apos;s academic criteria.
+                    </p>
                   </div>
                 )}
               </div>

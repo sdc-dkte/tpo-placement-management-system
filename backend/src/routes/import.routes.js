@@ -4,6 +4,7 @@ const multer = require("multer");
 const {
     importStudents,
     getImportBatchStatus,
+    getLatestImportBatch,
     retryImportBatch,
     recoverImportBatch
 } = require("../controllers/import.controller");
@@ -57,6 +58,13 @@ router.post(
     allowRoles("TPO"),
     handleUpload,
     importStudents
+);
+
+router.get(
+    "/latest",
+    authenticateToken,
+    allowRoles("TPO"),
+    getLatestImportBatch
 );
 
 router.get(

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   UploadCloud,
   Download,
@@ -11,6 +11,7 @@ import {
   getStudentsApi,
   getDepartmentsApi,
   getDashboardOverviewApi,
+  getLatestImportBatchApi,
   createStudentApi,
   updateStudentApi,
   deleteStudentApi,
@@ -29,27 +30,53 @@ import Pagination from "./Pagination";
 
 /**
  * Adapter: Direct mapping of backend API response fields.
- * Any missing backend field is explicitly flagged as unprovided by API.
+ * Conforms strictly to DKTE placement guidelines:
+ * - Unplaced: "Not Placed" (no false universal drive eligibility)
+ * - Selected: Company + Selection Pending Confirmation
+ * - Offer Accepted / Placed: Company + confirmed CTC package
+ * - Offer Declined: Company + Offer Declined
  */
 function mapBackendStudentToRoster(student) {
-  const isPlaced =
-    student.placementStatus === "SELECTED" ||
-    student.placementStatus === "OFFER_ACCEPTED" ||
-    student.selection?.status === "SELECTED" ||
-    student.selection?.status === "OFFER_ACCEPTED";
+  const rawStatus =
+    student.placementStatus ||
+    student.selection?.status ||
+    "NOT_SELECTED";
 
-  const isInReview = student.placementStatus === "IN_REVIEW";
+  const companyName =
+    student.companyName ||
+    student.selection?.drive?.company?.name ||
+    student.selection?.company?.name ||
+    null;
 
-  const status = isPlaced ? "Placed" : isInReview ? "In Review" : "Unplaced";
+  const packageLPA =
+    student.packageLPA ??
+    student.selection?.packageLPA ??
+    null;
 
-  // Use direct companyName and packageLPA returned by backend API
-  const organization = isPlaced
-    ? student.companyName || student.selection?.company?.name || "Placed"
-    : isInReview
-    ? "Drive in Review"
-    : "Open to Drives";
+  let status = "Unplaced";
+  let placementDetails = "Not Placed";
 
-  const packageLPA = student.packageLPA ?? student.selection?.packageLPA ?? null;
+  if (rawStatus === "OFFER_ACCEPTED") {
+    status = "Placed / Confirmed";
+    placementDetails = companyName
+      ? `${companyName}${packageLPA ? ` • ₹${Number(packageLPA).toFixed(2)} LPA` : " • Offer Accepted"}`
+      : packageLPA
+      ? `Confirmed • ₹${Number(packageLPA).toFixed(2)} LPA`
+      : "Offer Accepted";
+  } else if (rawStatus === "SELECTED") {
+    status = "Selected";
+    placementDetails = companyName
+      ? `${companyName} • Selection Pending Confirmation`
+      : "Selection Pending Confirmation";
+  } else if (rawStatus === "OFFER_DECLINED") {
+    status = "Offer Declined";
+    placementDetails = companyName
+      ? `${companyName} • Offer Declined`
+      : "Offer Declined";
+  } else {
+    status = "Unplaced";
+    placementDetails = "Not Placed";
+  }
 
   return {
     id: student.id,
@@ -62,9 +89,10 @@ function mapBackendStudentToRoster(student) {
     cgpa: student.CGPA ?? null,
     backlogs: student.activeBacklogs ?? 0,
     status,
-    rawPlacementStatus: student.placementStatus || "NOT_SELECTED",
-    organization,
+    rawPlacementStatus: rawStatus,
+    organization: companyName || (status === "Unplaced" ? null : "Corporate Partner"),
     packageLPA,
+    placementDetails,
     academicPathway: student.academicPathway || "HSC",
     tenthPercentage: student.tenthPercentage ?? null,
     twelfthPercentage: student.twelfthPercentage ?? null,
@@ -82,20 +110,23 @@ export default function StudentDirectoryPage() {
     total: 0,
     placed: 0,
     unplaced: 0,
-    syncStatus: "Connecting...",
+    departmentSummaries: [],
   });
+  const [latestImportBatch, setLatestImportBatch] = useState(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [serverTotalCount, setServerTotalCount] = useState(0);
   const [serverTotalPages, setServerTotalPages] = useState(1);
 
-  // Filter state
+  // Filter & Sorting state
   const [selectedBranch, setSelectedBranch] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [cgpaFilter, setCgpaFilter] = useState("ALL");
   const [backlogFilter, setBacklogFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState("name");
+  const [sortOrder, setSortOrder] = useState("asc");
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
@@ -108,7 +139,6 @@ export default function StudentDirectoryPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState(null);
   const [actionFeedback, setActionFeedback] = useState(null);
-
 
   // 1. Fetch departments from backend API
   const fetchDepartments = useCallback(async () => {
@@ -132,7 +162,7 @@ export default function StudentDirectoryPage() {
           total: res.data.totalStudents ?? 0,
           placed: res.data.placedStudents ?? 0,
           unplaced: res.data.unplacedStudents ?? 0,
-          syncStatus: "Active & Synchronized",
+          departmentSummaries: res.data.departmentSummaries || [],
         });
       }
     } catch (err) {
@@ -141,12 +171,68 @@ export default function StudentDirectoryPage() {
     }
   }, []);
 
+  // 3. Fetch latest import batch tracking info
+  const fetchLatestImport = useCallback(async () => {
+    try {
+      const res = await getLatestImportBatchApi();
+      if (res?.data) {
+        setLatestImportBatch(res.data);
+      }
+    } catch (err) {
+      console.warn("Latest import batch API error:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDepartments();
     fetchOverview();
-  }, [fetchDepartments, fetchOverview]);
+    fetchLatestImport();
+  }, [fetchDepartments, fetchOverview, fetchLatestImport]);
 
-  // 3. Fetch students from GET /api/v1/students
+  // Dynamic, truthful synchronization status display
+  const syncStatus = useMemo(() => {
+    if (!latestImportBatch) {
+      return "Database Registry: Connected";
+    }
+    const importDate = latestImportBatch.completedAt || latestImportBatch.importedAt;
+    const dateStr = importDate
+      ? new Date(importDate).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "Recent";
+    const synced = latestImportBatch.successfulRows ?? 0;
+    const failed = latestImportBatch.failedRows ?? 0;
+    return `Last Import: ${dateStr} (${synced} synced${failed > 0 ? `, ${failed} rejected` : ""})`;
+  }, [latestImportBatch]);
+
+  // Reconciled KPI metrics ensuring Total = Placed + Unplaced across all & department filters
+  const reconciledKPIs = useMemo(() => {
+    if (selectedBranch === "ALL") {
+      const total = overviewStats.total || 0;
+      const placed = overviewStats.placed || 0;
+      const unplaced = Math.max(0, total - placed);
+      return { total, placed, unplaced };
+    }
+
+    const deptSummary = overviewStats.departmentSummaries?.find(
+      (d) => d.departmentCode === selectedBranch
+    );
+
+    if (deptSummary) {
+      const total = deptSummary.totalStudents || 0;
+      const placed = deptSummary.placedStudents || 0;
+      const unplaced = Math.max(0, total - placed);
+      return { total, placed, unplaced };
+    }
+
+    const dept = departments.find((d) => d.code === selectedBranch);
+    const total = dept?.studentCount || 0;
+    return { total, placed: 0, unplaced: total };
+  }, [selectedBranch, overviewStats, departments]);
+
+  // 4. Fetch students from GET /api/v1/students
   const fetchStudents = useCallback(async () => {
     setIsLoading(true);
     setApiError(null);
@@ -161,7 +247,8 @@ export default function StudentDirectoryPage() {
       const params = {
         page: currentPage,
         limit: pageSize,
-        sortOrder: "asc",
+        sortBy,
+        sortOrder,
       };
 
       if (searchQuery.trim()) {
@@ -178,13 +265,12 @@ export default function StudentDirectoryPage() {
 
       if (backlogFilter === "ZERO") {
         params.maxBacklogs = 0;
+      } else if (backlogFilter === "HAS_BACKLOGS") {
+        params.minBacklogs = 1;
       }
 
-      // Backend supports ?status=PLACED or ?status=UNPLACED
-      if (statusFilter === "Placed") {
-        params.status = "PLACED";
-      } else if (statusFilter === "Unplaced") {
-        params.status = "UNPLACED";
+      if (statusFilter !== "ALL") {
+        params.status = statusFilter;
       }
 
       const res = await getStudentsApi(params);
@@ -202,17 +288,7 @@ export default function StudentDirectoryPage() {
 
         const rosterStudents = res.data.map(mapBackendStudentToRoster);
 
-        // Client-side filter fallback for "In Review" (not an official DB placement status) and live backlogs
-        let filtered =
-          statusFilter === "In Review"
-            ? rosterStudents.filter((s) => s.status === "In Review")
-            : rosterStudents;
-
-        if (backlogFilter === "HAS_BACKLOGS") {
-          filtered = filtered.filter((s) => s.backlogs > 0);
-        }
-
-        setStudents(filtered);
+        setStudents(rosterStudents);
         setServerTotalCount(total);
         setServerTotalPages(totalPages);
       } else {
@@ -237,6 +313,8 @@ export default function StudentDirectoryPage() {
     cgpaFilter,
     backlogFilter,
     statusFilter,
+    sortBy,
+    sortOrder,
     departments,
   ]);
 
@@ -244,6 +322,17 @@ export default function StudentDirectoryPage() {
     const timer = setTimeout(fetchStudents, 250);
     return () => clearTimeout(timer);
   }, [fetchStudents]);
+
+  // Column header sorting handler
+  const handleSort = (field) => {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+    setCurrentPage(1);
+  };
 
   // Multi-select handlers
   const handleToggleSelect = (id) => {
@@ -275,17 +364,19 @@ export default function StudentDirectoryPage() {
     setCgpaFilter("ALL");
     setBacklogFilter("ALL");
     setStatusFilter("ALL");
+    setSortBy("name");
+    setSortOrder("asc");
     setCurrentPage(1);
   };
 
   // Export filtered roster to CSV
   const handleExportRoster = (targetList = students) => {
     let csv =
-      "PRN,Candidate Name,Email,Branch,CGPA,Backlogs,Placement Status,Organization,Package (LPA)\n";
+      "PRN,Candidate Name,Email,Branch,CGPA,Backlogs,Placement Status,Placement Details,Package (LPA)\n";
     targetList.forEach((s) => {
       csv += `${s.prn},"${s.name}",${s.email},"${s.branch}",${s.cgpa || ""},${
         s.backlogs
-      },"${s.status}","${s.organization || ""}",${s.packageLPA || ""}\n`;
+      },"${s.status}","${s.placementDetails || s.organization || ""}",${s.packageLPA || ""}\n`;
     });
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -309,9 +400,9 @@ export default function StudentDirectoryPage() {
 
   // Callback when batch ingestion completes
   const handleIngestionSuccess = () => {
-    // Re-query real backend data to reflect new state
     fetchOverview();
     fetchDepartments();
+    fetchLatestImport();
     fetchStudents();
   };
 
@@ -405,7 +496,7 @@ export default function StudentDirectoryPage() {
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-[#F8FAFC]">
       {/* Top Header Bar */}
-      <header className="h-16 bg-white border-b border-[#E5E7EB] px-8 flex items-center justify-between sticky top-0 z-10">
+      <header className="h-16 bg-white border-b border-[#E5E7EB] px-8 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-2 text-xs text-gray-500 font-medium select-none">
           <span>Student Registry</span>
           <span>/</span>
@@ -472,6 +563,7 @@ export default function StudentDirectoryPage() {
             </button>
           </div>
         )}
+
         {/* Page Title Row */}
         <div>
           <div className="flex items-center gap-2.5">
@@ -502,6 +594,7 @@ export default function StudentDirectoryPage() {
               onClick={() => {
                 fetchOverview();
                 fetchDepartments();
+                fetchLatestImport();
                 fetchStudents();
               }}
               className="px-2.5 py-1 rounded bg-rose-600 text-white font-semibold text-[11px] hover:bg-rose-700 transition"
@@ -513,10 +606,10 @@ export default function StudentDirectoryPage() {
 
         {/* 1. KPI Metric Strip */}
         <StudentStatsBar
-          total={overviewStats.total}
-          placed={overviewStats.placed}
-          unplaced={overviewStats.unplaced}
-          syncStatus={overviewStats.syncStatus}
+          total={reconciledKPIs.total}
+          placed={reconciledKPIs.placed}
+          unplaced={reconciledKPIs.unplaced}
+          syncStatus={syncStatus}
         />
 
         {/* 2. Department Filter Chips */}
@@ -553,7 +646,7 @@ export default function StudentDirectoryPage() {
             setCurrentPage(1);
           }}
           onClearFilters={handleClearFilters}
-          totalCount={overviewStats.total}
+          totalCount={reconciledKPIs.total}
           visibleCount={serverTotalCount}
           onAddStudent={handleOpenAddStudent}
         />
@@ -563,6 +656,9 @@ export default function StudentDirectoryPage() {
           students={students}
           selectedIds={selectedIds}
           activeStudentId={activeDossierStudent?.id}
+          sortBy={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
           onToggleSelect={handleToggleSelect}
           onToggleSelectAll={handleToggleSelectAll}
           onViewDossier={(student) => setActiveDossierStudent(student)}

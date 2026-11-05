@@ -6,10 +6,13 @@ const prisma = new PrismaClient();
 
 const departments = [
     { name: "Computer Science and Engineering", code: "CSE" },
-    { name: "Information Technology", code: "IT" },
-    { name: "Electronics and Telecommunication", code: "ENTC" },
+    { name: "Artificial Intelligence and Data Science", code: "AIDS" },
+    { name: "Computer Science and Engineering (AIML)", code: "AIML" },
+    { name: "Electronics and Telecommunication Engineering", code: "ENTC" },
+    { name: "Electrical Engineering", code: "ELEC" },
     { name: "Mechanical Engineering", code: "MECH" },
     { name: "Civil Engineering", code: "CIVIL" },
+    { name: "Textile Engineering", code: "TEXTILE" },
 ];
 
 async function main() {

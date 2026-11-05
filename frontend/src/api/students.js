@@ -26,9 +26,13 @@ export async function getStudentsApi(params = {}) {
   if (params.maxBacklogs !== undefined) {
     query.append("maxBacklogs", params.maxBacklogs);
   }
-  if (params.status && ["PLACED", "UNPLACED"].includes(params.status)) {
+  if (params.minBacklogs !== undefined) {
+    query.append("minBacklogs", params.minBacklogs);
+  }
+  if (params.status && params.status !== "ALL") {
     query.append("status", params.status);
   }
+  if (params.sortBy) query.append("sortBy", params.sortBy);
   if (params.sortOrder) query.append("sortOrder", params.sortOrder);
 
   const queryString = query.toString();
@@ -57,6 +61,14 @@ export async function getDepartmentsApi(params = {}) {
  */
 export async function getDashboardOverviewApi() {
   return apiClient("/dashboard/overview");
+}
+
+/**
+ * Fetch the latest academic roster CSV import batch status.
+ * Matches backend: GET /api/v1/import/latest
+ */
+export async function getLatestImportBatchApi() {
+  return apiClient("/import/latest");
 }
 
 /**

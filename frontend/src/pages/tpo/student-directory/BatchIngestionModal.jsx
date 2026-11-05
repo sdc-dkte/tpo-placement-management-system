@@ -34,7 +34,8 @@ export default function BatchIngestionModal({ isOpen, onClose, onIngestionSucces
       "22ET001,Vikram Shinde,vikram.shinde@dkte.ac.in,ENTC,2026,DIPLOMA,8.10,82.00,,84.50,0\n" +
       "22EE001,Aditi Patil,aditi.patil@dkte.ac.in,ELEC,2026,HSC,8.25,85.00,83.00,,0\n" +
       "22ME001,Pratiksha Kulkarni,pratiksha.kulkarni@dkte.ac.in,MECH,2026,HSC,7.95,88.00,82.40,,0\n" +
-      "22CV001,Digvijay Powar,digvijay.powar@dkte.ac.in,CIVIL,2026,HSC,7.80,82.50,78.00,,0\n";
+      "22CV001,Digvijay Powar,digvijay.powar@dkte.ac.in,CIVIL,2026,HSC,7.80,82.50,78.00,,0\n" +
+      "22TX001,Sneha Jadhav,sneha.jadhav@dkte.ac.in,TEXTILE,2026,HSC,8.40,86.00,81.50,,0\n";
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
