@@ -13,6 +13,9 @@ const {
     updateStudentAccountStatus,
 } = require("../controllers/student.controller");
 const { getMySelection } = require("../controllers/selection.controller");
+const {
+    getStudentDocuments,
+} = require("../controllers/document.controller");
 
 const authenticate = require("../middleware/auth.middleware");
 const authorizeRole = require("../middleware/role.middleware");
@@ -29,6 +32,13 @@ router.get("/me/selection", authorizeRole("STUDENT"), getMySelection);
 // TPO-only routes.
 router.post("/", authorizeRole("TPO"), createStudent);
 router.get("/", authorizeRole("TPO"), getStudents);
+
+router.get(
+    "/:studentId/documents",
+    authorizeRole("TPO"),
+    getStudentDocuments
+);
+
 router.get("/:studentId", authorizeRole("TPO"), getStudentById);
 router.patch("/:studentId", authorizeRole("TPO"), updateStudent);
 router.patch("/:id/status", authorizeRole("TPO"), updateStudentAccountStatus);
