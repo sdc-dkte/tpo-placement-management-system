@@ -173,24 +173,32 @@ const createStudent = async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(PRN.trim(), 12);
-
         const student = await prisma.$transaction(async (tx) => {
             return tx.student.create({
                 data: {
                     PRN: normalizedPRN,
-                    departmentId,
+
+                    department: {
+                        connect: {
+                            id: departmentId
+                        }
+                    },
+
                     graduationYear,
                     academicPathway,
                     CGPA: CGPA ?? null,
                     tenthPercentage: tenthPercentage ?? null,
+
                     twelfthPercentage:
                         academicPathway === "HSC"
                             ? twelfthPercentage
                             : null,
+
                     diplomaPercentage:
                         academicPathway === "DIPLOMA"
                             ? diplomaPercentage
                             : null,
+
                     activeBacklogs: activeBacklogs ?? 0,
 
                     user: {
@@ -200,9 +208,10 @@ const createStudent = async (req, res) => {
                             passwordHash,
                             role: "STUDENT",
                             mustChangePassword: true
-                        },
-                    },
+                        }
+                    }
                 },
+
                 select: {
                     id: true,
                     PRN: true,
@@ -214,6 +223,7 @@ const createStudent = async (req, res) => {
                     twelfthPercentage: true,
                     diplomaPercentage: true,
                     activeBacklogs: true,
+
                     user: {
                         select: {
                             id: true,
@@ -221,9 +231,9 @@ const createStudent = async (req, res) => {
                             email: true,
                             role: true,
                             mustChangePassword: true
-                        },
-                    },
-                },
+                        }
+                    }
+                }
             });
         });
 
@@ -262,6 +272,7 @@ const getStudents = async (req, res) => {
             graduationYear,
             minCGPA,
             maxBacklogs,
+            status,
             sortOrder = "asc",
         } = req.query;
 
@@ -298,6 +309,49 @@ const getStudents = async (req, res) => {
                     isActive: true,
                 },
             };
+        }
+
+        // Validate placement status filter
+        if (
+            status !== undefined &&
+            !["PLACED", "UNPLACED"].includes(status)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Status must be PLACED or UNPLACED.",
+            });
+        }
+
+        // Filter students by placement status
+        if (status === "PLACED") {
+            where.selection = {
+                is: {
+                    status: {
+                        in: ["SELECTED", "OFFER_ACCEPTED"],
+                    },
+                },
+            };
+        }
+
+        if (status === "UNPLACED") {
+            where.AND = [
+                {
+                    OR: [
+                        {
+                            selection: {
+                                is: null,
+                            },
+                        },
+                        {
+                            selection: {
+                                is: {
+                                    status: "OFFER_DECLINED",
+                                },
+                            },
+                        },
+                    ],
+                },
+            ];
         }
 
         // Search by PRN, name, or email
@@ -472,6 +526,16 @@ const getStudents = async (req, res) => {
                     selection: {
                         select: {
                             status: true,
+                            packageLPA: true,
+                            drive: {
+                                select: {
+                                    company: {
+                                        select: {
+                                            name: true,
+                                        },
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -488,6 +552,12 @@ const getStudents = async (req, res) => {
                 placementStatus: selection
                     ? selection.status
                     : "NOT_SELECTED",
+                packageLPA: selection
+                    ? selection.packageLPA
+                    : null,
+                companyName: selection
+                    ? selection.drive.company.name
+                    : null,
             };
         });
 
