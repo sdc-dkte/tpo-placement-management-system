@@ -48,6 +48,13 @@ const checkSpecificStudentEligibility = async (req, res) => {
             driveId
         );
 
+        if (result.error) {
+            return res.status(400).json({
+                success: false,
+                message: result.message,
+            });
+        }
+
         if (result.notFound) {
             return res.status(404).json({
                 success: false,
