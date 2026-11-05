@@ -7,7 +7,11 @@ const prisma = require("../prismaClient");
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const toNumber = (value) => {
-    if (value === undefined || value === null || String(value).trim() === "") {
+    if (
+        value === undefined ||
+        value === null ||
+        ["", "NA", "NIL", "-"].includes(String(value).trim().toUpperCase())
+    ) {
         return null;
     }
 
@@ -15,17 +19,35 @@ const toNumber = (value) => {
     return Number.isFinite(n) ? n : NaN;
 };
 
+const toPercentage = (value) => {
+    if (
+        value === undefined ||
+        value === null ||
+        ["", "NA", "NIL", "-"].includes(String(value).trim().toUpperCase())
+    ) {
+        return null;
+    }
+
+    const normalizedValue = String(value).trim().replace(/%$/, "");
+    const n = Number(normalizedValue);
+
+    return Number.isFinite(n) ? n : NaN;
+};
+
 const generateTempPassword = () =>
     crypto.randomBytes(6).toString("base64url") + "#7";
 
 const validateRow = (row, departmentsByCode) => {
-    const PRN = (row.PRN || "").trim();
+    const PRN = (row.PRN || "")
+        .replace(/\s+/g, "")
+        .toUpperCase();
     const name = (row.name || "").trim();
     const email = (row.email || "").trim().toLowerCase();
     const departmentCode = (row.departmentCode || "").trim().toUpperCase();
     const pathway = (row.academicPathway || "").trim().toUpperCase();
 
     if (!PRN) return { error: "PRN is required." };
+
     if (!name) return { error: "Name is required.", PRN };
     if (!EMAIL_REGEX.test(email)) {
         return { error: "Valid email is required.", PRN };
@@ -50,9 +72,10 @@ const validateRow = (row, departmentsByCode) => {
     }
 
     const CGPA = toNumber(row.CGPA);
-    const tenthPercentage = toNumber(row.tenthPercentage);
-    const twelfthPercentage = toNumber(row.twelfthPercentage);
-    const diplomaPercentage = toNumber(row.diplomaPercentage);
+
+    const tenthPercentage = toPercentage(row.tenthPercentage);
+    const twelfthPercentage = toPercentage(row.twelfthPercentage);
+    const diplomaPercentage = toPercentage(row.diplomaPercentage);
     const activeBacklogs = toNumber(row.activeBacklogs) ?? 0;
 
     const inRange = (value, max) =>
