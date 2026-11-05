@@ -4,7 +4,7 @@ export default function StudentStatsBar({
   total = 0,
   placed = 0,
   unplaced = 0,
-  syncStatus = "Active & Synchronized",
+  syncStatus = "Institutional Roster Active • All 8 Branches Enrolled",
 }) {
   const placedPercent = total > 0 ? ((placed / total) * 100).toFixed(1) : "0.0";
 

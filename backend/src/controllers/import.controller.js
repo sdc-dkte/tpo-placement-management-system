@@ -1168,39 +1168,9 @@ async function recoverImportBatch(req, res) {
 
 
 
-const getLatestImportBatch = async (req, res) => {
-    try {
-        const batch = await prisma.academicImportBatch.findFirst({
-            orderBy: { id: "desc" },
-            select: {
-                id: true,
-                fileName: true,
-                status: true,
-                totalRows: true,
-                successfulRows: true,
-                failedRows: true,
-                importedAt: true,
-                completedAt: true,
-            },
-        });
-
-        return res.status(200).json({
-            success: true,
-            data: batch || null,
-        });
-    } catch (error) {
-        console.error("getLatestImportBatch error:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch latest import batch.",
-        });
-    }
-};
-
 module.exports = {
     importStudents,
     getImportBatchStatus,
-    getLatestImportBatch,
     retryImportBatch,
     recoverImportBatch
 };

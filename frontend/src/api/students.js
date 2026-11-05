@@ -64,14 +64,6 @@ export async function getDashboardOverviewApi() {
 }
 
 /**
- * Fetch the latest academic roster CSV import batch status.
- * Matches backend: GET /api/v1/import/latest
- */
-export async function getLatestImportBatchApi() {
-  return apiClient("/import/latest");
-}
-
-/**
  * Upload student CSV batch file.
  */
 export async function uploadStudentBatchCsvApi(file) {
