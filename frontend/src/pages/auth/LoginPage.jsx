@@ -9,27 +9,43 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   ShieldCheck,
   Building2,
   Sparkles,
+  X,
 } from 'lucide-react';
+
+const REMEMBER_EMAIL_KEY = 'dkte_tpo_remembered_email';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState(
+    () => localStorage.getItem(REMEMBER_EMAIL_KEY) || ''
+  );
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(
+    () => Boolean(localStorage.getItem(REMEMBER_EMAIL_KEY))
+  );
+  const [isCapsLockOn, setIsCapsLockOn] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handlePasswordKey = (e) => {
+    if (e.getModifierState) {
+      setIsCapsLockOn(e.getModifierState('CapsLock'));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
 
-    const trimmedId = identifier.trim();
+    const trimmedId = identifier.trim().toLowerCase();
     if (!trimmedId) {
       setErrorMessage('Please enter your institutional email.');
       return;
@@ -40,6 +56,13 @@ export default function LoginPage() {
       return;
     }
 
+    // Handle "Remember Email" preference
+    if (rememberMe) {
+      localStorage.setItem(REMEMBER_EMAIL_KEY, trimmedId);
+    } else {
+      localStorage.removeItem(REMEMBER_EMAIL_KEY);
+    }
+
     setIsSubmitting(true);
     try {
       const response = await login({
@@ -48,14 +71,18 @@ export default function LoginPage() {
       });
 
       if (response?.user?.role === 'TPO') {
-        navigate('/dashboard', { replace: true });
+        navigate('/students', { replace: true });
       } else {
         navigate('/portal/dossier', { replace: true });
       }
     } catch (err) {
-      setErrorMessage(
-        err.message || 'Invalid credentials. Please verify your email and password.'
-      );
+      if (err.name === 'TypeError' || err.message === 'Failed to fetch') {
+        setErrorMessage('Unable to connect to placement server. Please verify the backend is running.');
+      } else {
+        setErrorMessage(
+          err.message || 'Invalid credentials. Please verify your email and password.'
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -142,7 +169,7 @@ export default function LoginPage() {
       <div className="w-full lg:w-[42%] flex items-center justify-center p-6 sm:p-10 lg:p-14">
         <div className="w-full max-w-md bg-white border border-gray-200 rounded p-8 sm:p-10 shadow-hairline">
           {/* Header Accent Bar & Titles */}
-          <div className="mb-7">
+          <div className="mb-6">
             <div className="flex items-center justify-between mb-4">
               <img
                 src={dkteLogo}
@@ -158,7 +185,7 @@ export default function LoginPage() {
               Institutional Sign-In
             </h2>
             <p className="text-xs sm:text-sm text-gray-600">
-              Sign in with your DKTE credentials to access your portal.
+              Sign in with your DKTE credentials to access your placement dashboard.
             </p>
           </div>
 
@@ -166,7 +193,7 @@ export default function LoginPage() {
           {errorMessage && (
             <div
               role="alert"
-              className="mb-6 p-3 rounded border border-red-200 bg-red-50 text-red-800 text-xs sm:text-sm flex items-start space-x-2.5 animate-fadeIn"
+              className="mb-5 p-3 rounded border border-red-200 bg-red-50 text-red-800 text-xs sm:text-sm flex items-start space-x-2.5 animate-fadeIn"
             >
               <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
               <div className="leading-snug">{errorMessage}</div>
@@ -202,8 +229,21 @@ export default function LoginPage() {
                     if (errorMessage) setErrorMessage('');
                   }}
                   placeholder="e.g. student@dkte.ac.in or tpo@dkte.ac.in"
-                  className="w-full pl-9 pr-3.5 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
+                  className="w-full pl-9 pr-9 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
                 />
+                {identifier && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier('');
+                      if (errorMessage) setErrorMessage('');
+                    }}
+                    aria-label="Clear email input"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -235,6 +275,8 @@ export default function LoginPage() {
                     setPassword(e.target.value);
                     if (errorMessage) setErrorMessage('');
                   }}
+                  onKeyDown={handlePasswordKey}
+                  onKeyUp={handlePasswordKey}
                   placeholder="••••••••••••"
                   className="w-full pl-9 pr-10 py-2.5 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#FECC00] focus:border-gray-900 transition-colors"
                 />
@@ -247,6 +289,30 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+
+              {/* Caps Lock Indicator */}
+              {isCapsLockOn && (
+                <div
+                  role="status"
+                  className="mt-1.5 flex items-center space-x-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2 py-1 rounded animate-fadeIn"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                  <span className="font-medium">Caps Lock is ON</span>
+                </div>
+              )}
+            </div>
+
+            {/* Utility Row: Remember Me */}
+            <div className="flex items-center text-xs pt-0.5">
+              <label className="flex items-center space-x-2 cursor-pointer select-none text-gray-600 hover:text-gray-900">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-gray-900 focus:ring-[#FECC00] focus:ring-offset-0 cursor-pointer"
+                />
+                <span className="text-[12px]">Remember email</span>
+              </label>
             </div>
 
             {/* Primary Action Button: DKTE Gold (#FECC00) */}
@@ -268,9 +334,9 @@ export default function LoginPage() {
             </div>
           </form>
 
-          {/* Minimal Quick-Fill Testing Shortcuts */}
-          <div className="mt-8 pt-5 border-t border-gray-100">
-            <div className="flex items-center justify-between mb-2.5">
+          {/* Quick-Fill Testing Shortcuts for Local Development */}
+          <div className="mt-7 pt-4 border-t border-gray-100">
+            <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-semibold tracking-wider text-gray-400 uppercase flex items-center space-x-1">
                 <Sparkles className="w-3 h-3 text-[#FECC00]" />
                 <span>Demo Accounts</span>
@@ -298,9 +364,19 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Subdued Security Disclaimer */}
-          <div className="mt-6 text-center text-[11px] text-gray-400">
-            Official institutional access. Authorized personnel and students only.
+          {/* Institutional Helpdesk & Placement Contact Footer */}
+          <div className="mt-6 pt-4 border-t border-gray-100 text-center text-[11px] text-gray-400 space-y-1">
+            <p className="font-medium text-gray-600">Central Training &amp; Placement Cell • DKTE Ichalkaranji</p>
+            <p>
+              Need assistance? Email{' '}
+              <a
+                href="mailto:placement@dkte.ac.in"
+                className="text-gray-600 hover:text-gray-900 underline font-medium"
+              >
+                placement@dkte.ac.in
+              </a>{' '}
+              or visit the TPO Placement Office.
+            </p>
           </div>
         </div>
       </div>
