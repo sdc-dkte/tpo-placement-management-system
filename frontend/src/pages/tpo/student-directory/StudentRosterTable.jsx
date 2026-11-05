@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, AlertTriangle, ArrowRight, User, Pencil } from "lucide-react";
+import { Check, AlertTriangle, ArrowRight, User, Pencil, Trash2, FileText } from "lucide-react";
 
 export default function StudentRosterTable({
   students = [],
@@ -9,6 +9,7 @@ export default function StudentRosterTable({
   onToggleSelectAll,
   onViewDossier,
   onEditStudent,
+  onDeleteStudent,
 }) {
   const isAllSelected =
     students.length > 0 && students.every((s) => selectedIds.includes(s.id));
@@ -203,7 +204,7 @@ export default function StudentRosterTable({
                         </span>
                       ) : (
                         <span className="text-gray-400 text-[11px]">
-                          Open to Drives —
+                          Open to Drives
                         </span>
                       )}
                     </td>
@@ -230,6 +231,22 @@ export default function StudentRosterTable({
                           className="p-1.5 text-gray-400 hover:text-gray-700 rounded-md hover:bg-gray-100 transition cursor-pointer"
                         >
                           <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onViewDossier && onViewDossier(student)}
+                          title={`View ${student.name}'s Documents & Resume`}
+                          className="p-1.5 text-gray-400 hover:text-blue-700 rounded-md hover:bg-blue-50 transition cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteStudent && onDeleteStudent(student)}
+                          title="Remove Candidate"
+                          className="p-1.5 text-gray-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>

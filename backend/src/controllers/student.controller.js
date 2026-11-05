@@ -292,6 +292,13 @@ const getStudents = async (req, res) => {
         }
 
         const where = {};
+        if (req.query.includeInactive !== "true") {
+            where.user = {
+                is: {
+                    isActive: true,
+                },
+            };
+        }
 
         // Search by PRN, name, or email
         if (search !== undefined) {
@@ -451,6 +458,7 @@ const getStudents = async (req, res) => {
                         select: {
                             name: true,
                             email: true,
+                            isActive: true,
                         },
                     },
                     department: {

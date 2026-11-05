@@ -26,6 +26,9 @@ export async function getStudentsApi(params = {}) {
   if (params.maxBacklogs !== undefined) {
     query.append("maxBacklogs", params.maxBacklogs);
   }
+  if (params.status && params.status !== "ALL") {
+    query.append("status", params.status);
+  }
   if (params.sortOrder) query.append("sortOrder", params.sortOrder);
 
   const queryString = query.toString();
@@ -138,4 +141,18 @@ export async function updateStudentStatusApi(studentId, isActive = false) {
     method: "PATCH",
     body: { isActive },
   });
+}
+
+/**
+ * Remove/Deactivate student from placement roster.
+ */
+export async function deleteStudentApi(studentId) {
+  return updateStudentStatusApi(studentId, false);
+}
+
+/**
+ * Bulk remove/deactivate candidates from placement roster.
+ */
+export async function bulkDeleteStudentsApi(studentIds = []) {
+  return Promise.all(studentIds.map((id) => updateStudentStatusApi(id, false)));
 }

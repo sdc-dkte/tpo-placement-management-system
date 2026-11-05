@@ -10,7 +10,15 @@ const getOverview = async (req, res, next) => {
             ongoingDrives,
             departments,
         ] = await Promise.all([
-            prisma.student.count(),
+            prisma.student.count({
+                where: {
+                    user: {
+                        is: {
+                            isActive: true,
+                        },
+                    },
+                },
+            }),
 
             prisma.studentSelection.findMany({
                 where: {
@@ -43,6 +51,13 @@ const getOverview = async (req, res, next) => {
                     name: true,
                     code: true,
                     students: {
+                        where: {
+                            user: {
+                                is: {
+                                    isActive: true,
+                                },
+                            },
+                        },
                         select: {
                             id: true,
                             selection: {

@@ -13,6 +13,7 @@ import {
   getDashboardOverviewApi,
   createStudentApi,
   updateStudentApi,
+  deleteStudentApi,
 } from "../../../api/students";
 
 import StudentStatsBar from "./StudentStatsBar";
@@ -22,6 +23,7 @@ import StudentRosterTable from "./StudentRosterTable";
 import CandidateDossierDrawer from "./CandidateDossierDrawer";
 import BatchIngestionModal from "./BatchIngestionModal";
 import StudentFormModal from "./StudentFormModal";
+import DeleteConfirmModal from "./DeleteConfirmModal";
 import BulkActionBar from "./BulkActionBar";
 import Pagination from "./Pagination";
 
@@ -45,7 +47,7 @@ function mapBackendStudentToRoster(student) {
     ? student.selection?.company?.name || "Placed (Company not returned by API)"
     : isInReview
     ? "Drive in Review"
-    : "Open to Drives —";
+    : "Open to Drives";
 
   return {
     id: student.id,
@@ -101,6 +103,8 @@ export default function StudentDirectoryPage() {
   const [activeDossierStudent, setActiveDossierStudent] = useState(null);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [studentToEdit, setStudentToEdit] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [studentToDelete, setStudentToDelete] = useState(null);
   const [actionFeedback, setActionFeedback] = useState(null);
 
 
@@ -189,11 +193,15 @@ export default function StudentDirectoryPage() {
 
         const rosterStudents = res.data.map(mapBackendStudentToRoster);
 
-        // Client-side filter for status because backend lacks ?status= query filter
-        const filtered =
+        // Client-side filter for status and backlog states
+        let filtered =
           statusFilter === "ALL"
             ? rosterStudents
             : rosterStudents.filter((s) => s.status === statusFilter);
+
+        if (backlogFilter === "HAS_BACKLOGS") {
+          filtered = filtered.filter((s) => s.backlogs > 0);
+        }
 
         setStudents(filtered);
         setServerTotalCount(total);
@@ -307,6 +315,41 @@ export default function StudentDirectoryPage() {
   const handleOpenEditStudent = (student) => {
     setStudentToEdit(student);
     setIsFormModalOpen(true);
+  };
+
+  const handleOpenDeleteStudent = (student) => {
+    setStudentToDelete(student);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDeleteSingle = async () => {
+    if (!studentToDelete) return;
+    try {
+      await deleteStudentApi(studentToDelete.id);
+      setSelectedIds((prev) => prev.filter((id) => id !== studentToDelete.id));
+      if (activeDossierStudent?.id === studentToDelete.id) {
+        setActiveDossierStudent(null);
+      }
+      setActionFeedback({
+        type: "success",
+        message: `Candidate ${studentToDelete.name} (${studentToDelete.prn}) removed from active roster.`,
+      });
+
+      if (students.length <= 1 && currentPage > 1) {
+        setCurrentPage((prev) => Math.max(1, prev - 1));
+      } else {
+        fetchStudents();
+      }
+      fetchOverview();
+    } catch (err) {
+      console.error("Backend delete error:", err);
+      setActionFeedback({
+        type: "error",
+        message: err.message || `Failed to remove candidate ${studentToDelete.name}.`,
+      });
+    }
+
+    setTimeout(() => setActionFeedback(null), 5000);
   };
 
   const handleFormSubmit = async (payload) => {
@@ -515,6 +558,7 @@ export default function StudentDirectoryPage() {
           onToggleSelectAll={handleToggleSelectAll}
           onViewDossier={(student) => setActiveDossierStudent(student)}
           onEditStudent={handleOpenEditStudent}
+          onDeleteStudent={handleOpenDeleteStudent}
         />
 
         {/* 5. Pagination */}
@@ -540,6 +584,7 @@ export default function StudentDirectoryPage() {
         isOpen={Boolean(activeDossierStudent)}
         onClose={() => setActiveDossierStudent(null)}
         onEditStudent={handleOpenEditStudent}
+        onDeleteStudent={handleOpenDeleteStudent}
       />
 
       {/* Batch Ingestion Modal */}
@@ -559,6 +604,17 @@ export default function StudentDirectoryPage() {
         onSubmit={handleFormSubmit}
         initialData={studentToEdit}
         departments={departments}
+      />
+
+      {/* Delete Single Student Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setStudentToDelete(null);
+        }}
+        onConfirm={handleConfirmDeleteSingle}
+        student={studentToDelete}
       />
     </div>
   );
