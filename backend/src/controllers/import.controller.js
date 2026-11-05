@@ -168,7 +168,6 @@ const refreshBatchSummary = async (batchId, expectedToken) => {
         where: { id: batchId },
         select: {
             totalRows: true,
-            processingToken: true,
         },
     });
 
