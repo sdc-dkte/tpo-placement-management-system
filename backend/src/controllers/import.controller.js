@@ -1129,29 +1129,26 @@ async function recoverImportBatch(req, res) {
     } catch (error) {
         console.error("Recover import batch error:", error);
 
-
-        if (batchId) {
+        if (batchId && recoveryToken) {
             try {
                 await refreshBatchSummary(batchId, recoveryToken);
 
-                if (typeof recoveryToken !== "undefined" && recoveryToken) {
-                    const released = await prisma.academicImportBatch.updateMany({
-                        where: {
-                            id: batchId,
-                            importedByUserId: req.user.id,
-                            processingToken: recoveryToken,
-                        },
-                        data: {
-                            processingToken: null,
-                            processingStartedAt: null,
-                        },
-                    });
+                const released = await prisma.academicImportBatch.updateMany({
+                    where: {
+                        id: batchId,
+                        importedByUserId: req.user.id,
+                        processingToken: recoveryToken,
+                    },
+                    data: {
+                        processingToken: null,
+                        processingStartedAt: null,
+                    },
+                });
 
-                    if (released.count !== 1) {
-                        console.warn(
-                            `Recovery batch ${batchId}: lease was not released because ownership changed.`
-                        );
-                    }
+                if (released.count !== 1) {
+                    console.warn(
+                        `Recovery batch ${batchId}: lease was not released because ownership changed.`
+                    );
                 }
             } catch (summaryError) {
                 console.error(
@@ -1160,7 +1157,6 @@ async function recoverImportBatch(req, res) {
                 );
             }
         }
-
 
         return res.status(500).json({
             success: false,
