@@ -242,7 +242,7 @@ export default function BatchIngestionModal({ isOpen, onClose, onIngestionSucces
               <div className="leading-relaxed">
                 Supports single-department or multi-department CSV batches. Official DKTE department codes:{" "}
                 <span className="font-mono font-semibold text-gray-800">
-                  CSE, AIML, AIDS, ENTC, ELEC, MECH, CIVIL
+                  CSE, AIML, AIDS, ENTC, ELEC, MECH, CIVIL, TEXTILE
                 </span>
                 .
               </div>
@@ -295,7 +295,7 @@ export default function BatchIngestionModal({ isOpen, onClose, onIngestionSucces
                   className="px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition shadow-2xs cursor-pointer flex items-center gap-1.5"
                 >
                   <FileText className="w-3 h-3 text-emerald-600" />
-                  <span>Standard Batch (18 Students)</span>
+                  <span>Standard Batch (24 Students)</span>
                 </button>
                 <button
                   type="button"

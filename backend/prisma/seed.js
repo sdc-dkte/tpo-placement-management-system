@@ -54,50 +54,55 @@ async function main() {
         console.log("TPO account already exists. No changes made.");
     }
 
-    // 3. Seed Demo Student Account
-    const studentEmail = "student@dkte.ac.in";
-    const studentPRN = "24UAD065";
-    const studentPassword = studentPRN; // PRN as default password
-    const studentPasswordHash = await bcrypt.hash(studentPassword, 12);
+    // 3. Seed Demo Student Account (Optional: only if SEED_DEMO_STUDENT=true)
+    if (process.env.SEED_DEMO_STUDENT === "true") {
+        const studentEmail = "student@dkte.ac.in";
+        const studentPRN = "24UAD065";
+        const studentPassword = studentPRN; // PRN as default password
+        const studentPasswordHash = await bcrypt.hash(studentPassword, 12);
 
-    const existingStudent = await prisma.user.findUnique({
-        where: { email: studentEmail },
-    });
-
-    if (!existingStudent && cseDept) {
-        const studentUser = await prisma.user.create({
-            data: {
-                name: "Rahul Patil",
-                email: studentEmail,
-                passwordHash: studentPasswordHash,
-                role: "STUDENT",
-            },
+        const existingStudent = await prisma.user.findUnique({
+            where: { email: studentEmail },
         });
 
-        await prisma.student.create({
-            data: {
-                userId: studentUser.id,
-                PRN: studentPRN,
-                departmentId: cseDept.id,
-                graduationYear: 2028,
-                academicPathway: "HSC",
-                CGPA: 8.85,
-                tenthPercentage: 88.5,
-                twelfthPercentage: 86.0,
-                activeBacklogs: 0,
-            },
-        });
-        console.log(`Demo Student account created: ${studentEmail} (Password: ${studentPassword})`);
-    } else if (existingStudent) {
-        await prisma.user.update({
-            where: { id: existingStudent.id },
-            data: { passwordHash: studentPasswordHash },
-        });
-        await prisma.student.updateMany({
-            where: { userId: existingStudent.id },
-            data: { PRN: studentPRN },
-        });
-        console.log(`Demo Student PRN & password updated to PRN: ${studentPassword}`);
+        if (!existingStudent && cseDept) {
+            const studentUser = await prisma.user.create({
+                data: {
+                    name: "Rahul Patil",
+                    email: studentEmail,
+                    passwordHash: studentPasswordHash,
+                    role: "STUDENT",
+                },
+            });
+
+            await prisma.student.create({
+                data: {
+                    userId: studentUser.id,
+                    PRN: studentPRN,
+                    departmentId: cseDept.id,
+                    graduationYear: 2028,
+                    academicPathway: "HSC",
+                    CGPA: 8.85,
+                    tenthPercentage: 88.5,
+                    twelfthPercentage: 86.0,
+                    activeBacklogs: 0,
+                },
+            });
+            console.log(`Demo Student account created: ${studentEmail} (Password: ${studentPassword})`);
+        } else if (existingStudent) {
+            await prisma.user.update({
+                where: { id: existingStudent.id },
+                data: { passwordHash: studentPasswordHash },
+            });
+            await prisma.student.updateMany({
+                where: { userId: existingStudent.id },
+                data: { PRN: studentPRN },
+            });
+            console.log(`Demo Student PRN & password updated to PRN: ${studentPassword}`);
+        }
+    } else {
+        console.log("Database seeded successfully: All 8 departments and TPO administrator verified.");
+        console.log("Student roster remains clean (0 records). Ingest candidates via TPO Batch Ingestion.");
     }
 }
 
