@@ -76,6 +76,56 @@ const getMyDocument = async (req, res) => {
     }
 };
 
+const getStudentDocuments = async (req, res) => {
+    try {
+        const studentId = parseDocumentId(req.params.studentId);
+
+        if (!studentId) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid student ID.",
+            });
+        }
+
+        const student = await prisma.student.findUnique({
+            where: {
+                id: studentId,
+            },
+            select: {
+                id: true,
+            },
+        });
+
+        if (!student) {
+            return res.status(404).json({
+                success: false,
+                message: "Student not found.",
+            });
+        }
+
+        const documents = await prisma.studentDocument.findMany({
+            where: {
+                studentId,
+            },
+            orderBy: {
+                uploadedAt: "desc",
+            },
+        });
+
+        return res.status(200).json({
+            success: true,
+            documents,
+        });
+    } catch (error) {
+        console.error("Error fetching student documents for TPO:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch student documents.",
+        });
+    }
+};
+
 const uploadDocument = async (req, res) => {
     try {
         if (!req.file) {
@@ -469,6 +519,7 @@ const getAllDocumentsForTPO = async (req, res) => {
 
 module.exports = {
     getMyDocument,
+    getStudentDocuments,
     uploadDocument,
     deleteDocument,
     downloadDocument,
