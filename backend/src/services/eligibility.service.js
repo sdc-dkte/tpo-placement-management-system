@@ -18,10 +18,24 @@ const isValidNumber = (value, min, max) =>
 
 const evaluateStudentEligibility = (
     student,
-    criteria = {},
+    criteria = null,
     eligibleBranchIds = [],
     eligibleYears = []
 ) => {
+    if (!student || typeof student !== "object") {
+        return {
+            isEligible: false,
+            reasons: ["Student record is missing or invalid."],
+        };
+    }
+
+    if (!criteria || typeof criteria !== "object" || Object.keys(criteria).length === 0) {
+        return {
+            isEligible: false,
+            reasons: ["Eligibility criteria have not been configured for this drive."],
+        };
+    }
+
     const reasons = [];
 
     // 1. Department / Branch Check
@@ -40,83 +54,83 @@ const evaluateStudentEligibility = (
         }
     }
 
-    if (criteria) {
-        // 3. Minimum CGPA Check
-        const minCGPA = criteria.minimumCGPA ?? 0;
+    // 3. Minimum CGPA Check
+    const minCGPA = criteria.minimumCGPA ?? 0;
 
+    if (!isValidNumber(student.CGPA, 0, 10)) {
+        reasons.push("CGPA is missing or invalid.");
+    } else if (student.CGPA < minCGPA) {
+        reasons.push(
+            `CGPA (${student.CGPA}) is below the required minimum of ${minCGPA}.`
+        );
+    }
 
-        if (!isValidNumber(student.CGPA, 0, 10)) {
-            reasons.push("CGPA is missing or invalid.");
-        } else if (student.CGPA < minCGPA) {
-            reasons.push(
-                `CGPA (${student.CGPA}) is below the required minimum of ${minCGPA}.`
-            );
-        }
+    // 4. Minimum 10th Percentage Check
+    const minTenth = criteria.minimumTenth ?? 0;
 
-        // 4. Minimum 10th Percentage Check
-        const minTenth = criteria.minimumTenth ?? 0;
+    if (!isValidNumber(student.tenthPercentage, 0, 100)) {
+        reasons.push("10th percentage is missing or invalid.");
+    } else if (student.tenthPercentage < minTenth) {
+        reasons.push(
+            `10th percentage (${student.tenthPercentage}%) is below the required minimum of ${minTenth}%.`
+        );
+    }
 
-        if (!isValidNumber(student.tenthPercentage, 0, 100)) {
-            reasons.push("10th percentage is missing or invalid.");
-        } else if (student.tenthPercentage < minTenth) {
-            reasons.push(
-                `10th percentage (${student.tenthPercentage}%) is below the required minimum of ${minTenth}%.`
-            );
-        }
+    // 5. Pathway Specific Check (12th / Diploma)
+    if (!["HSC", "DIPLOMA"].includes(student.academicPathway)) {
+        reasons.push("Academic pathway is missing or invalid.");
+    }
 
-        // 5. Pathway Specific Check (12th / Diploma)
+    if (student.academicPathway === "HSC") {
+        const minTwelfth = criteria.minimumTwelfth;
+        const percentage = student.twelfthPercentage;
 
-        if (!["HSC", "DIPLOMA"].includes(student.academicPathway)) {
-            reasons.push("Academic pathway is missing or invalid.");
-        }
-
-        if (student.academicPathway === "HSC") {
-            const minTwelfth = criteria.minimumTwelfth;
-            const percentage = student.twelfthPercentage;
-
-            if (minTwelfth !== null && minTwelfth !== undefined && minTwelfth > 0) {
-                if (
-                    typeof percentage !== "number" ||
-                    !Number.isFinite(percentage) ||
-                    percentage < 0 ||
-                    percentage > 100
-                ) {
-                    reasons.push("12th percentage is missing or invalid.");
-                } else if (percentage < minTwelfth) {
-                    reasons.push(
-                        `12th percentage (${percentage}%) is below the required minimum of ${minTwelfth}%.`
-                    );
-                }
-            }
-        } else if (student.academicPathway === "DIPLOMA") {
-            const minDiploma = criteria.minimumDiplomaPercentage;
-            const percentage = student.diplomaPercentage;
-
+        if (minTwelfth !== null && minTwelfth !== undefined && minTwelfth > 0) {
             if (
-                minDiploma !== null &&
-                minDiploma !== undefined &&
-                minDiploma > 0
+                typeof percentage !== "number" ||
+                !Number.isFinite(percentage) ||
+                percentage < 0 ||
+                percentage > 100
             ) {
-                if (
-                    typeof percentage !== "number" ||
-                    !Number.isFinite(percentage) ||
-                    percentage < 0 ||
-                    percentage > 100
-                ) {
-                    reasons.push("Diploma percentage is missing or invalid.");
-                } else if (percentage < minDiploma) {
-                    reasons.push(
-                        `Diploma percentage (${percentage}%) is below the required minimum of ${minDiploma}%.`
-                    );
-                }
+                reasons.push("12th percentage is missing or invalid.");
+            } else if (percentage < minTwelfth) {
+                reasons.push(
+                    `12th percentage (${percentage}%) is below the required minimum of ${minTwelfth}%.`
+                );
             }
         }
+    } else if (student.academicPathway === "DIPLOMA") {
+        const minDiploma = criteria.minimumDiplomaPercentage;
+        const percentage = student.diplomaPercentage;
 
-        // 6. Active Backlogs Check
-        const maxBacklogs = criteria.maximumBacklogs ?? 0;
+        if (
+            minDiploma !== null &&
+            minDiploma !== undefined &&
+            minDiploma > 0
+        ) {
+            if (
+                typeof percentage !== "number" ||
+                !Number.isFinite(percentage) ||
+                percentage < 0 ||
+                percentage > 100
+            ) {
+                reasons.push("Diploma percentage is missing or invalid.");
+            } else if (percentage < minDiploma) {
+                reasons.push(
+                    `Diploma percentage (${percentage}%) is below the required minimum of ${minDiploma}%.`
+                );
+            }
+        }
+    }
+
+    // 6. Active Backlogs Check
+    // null / undefined means no backlog restriction
+    if (criteria.maximumBacklogs !== null && criteria.maximumBacklogs !== undefined) {
+        const maxBacklogs = Number(criteria.maximumBacklogs);
         const currentBacklogs = student.activeBacklogs;
 
         if (
+            typeof currentBacklogs !== "number" ||
             !Number.isInteger(currentBacklogs) ||
             currentBacklogs < 0
         ) {
@@ -126,20 +140,19 @@ const evaluateStudentEligibility = (
                 `Active backlogs (${currentBacklogs}) exceed the maximum allowed (${maxBacklogs}).`
             );
         }
+    }
 
+    // 7. Previous Placement / Single Offer Policy Check
+    // Uses official StudentSelection records; declined offers do not count as placed
+    if (criteria.allowPreviousPlacement === false) {
+        const selection = student.selection;
+        const isCurrentlyPlaced = selection != null && selection.status !== "OFFER_DECLINED";
 
-
-        // 7. Previous Placement / Single Offer Policy Check
-        if (criteria.allowPreviousPlacement === false) {
-            const hasSelection = student.selection != null;
-
-            if (hasSelection) {
-                reasons.push(
-                    "Student has already been placed and this drive does not permit previously placed students."
-                );
-            }
+        if (isCurrentlyPlaced) {
+            reasons.push(
+                "Student has already been placed and this drive does not permit previously placed students."
+            );
         }
-
     }
 
     return {
@@ -161,6 +174,21 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         graduationYear,
         statusFilter = "eligible_only", // "eligible_only" | "ineligible_only" | "all"
     } = options;
+
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+
+    if (
+        !Number.isInteger(pageNum) ||
+        pageNum < 1 ||
+        !Number.isInteger(limitNum) ||
+        limitNum < 1 ||
+        limitNum > 100
+    ) {
+        const error = new Error("Invalid pagination parameters. Page must be >= 1 and limit must be between 1 and 100.");
+        error.statusCode = 400;
+        throw error;
+    }
 
     const allowedStatusFilters = [
         "eligible_only",
@@ -207,7 +235,7 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
     const where = {};
 
 
-    if (departmentId !== undefined) {
+    if (departmentId !== undefined && departmentId !== null && String(departmentId).trim() !== "") {
         const id = Number(departmentId);
 
         if (!Number.isInteger(id) || id <= 0) {
@@ -219,7 +247,7 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         where.departmentId = id;
     }
 
-    if (graduationYear !== undefined) {
+    if (graduationYear !== undefined && graduationYear !== null && String(graduationYear).trim() !== "") {
         const year = Number(graduationYear);
 
         if (!Number.isInteger(year) || year < 2000 || year > 2100) {
@@ -285,7 +313,7 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
             twelfthPercentage: student.twelfthPercentage,
             diplomaPercentage: student.diplomaPercentage,
             activeBacklogs: student.activeBacklogs,
-            isPlaced: Boolean(student.selection),
+            isPlaced: Boolean(student.selection && student.selection.status !== "OFFER_DECLINED"),
             isEligible: evaluation.isEligible,
             reasons: evaluation.reasons,
         };
@@ -302,30 +330,13 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
         filteredList = evaluated.filter((s) => !s.isEligible);
     }
 
-    // Pagination
-    const pageNum = Number(page);
-    const limitNum = Number(limit);
-
-    if (
-        !Number.isInteger(pageNum) ||
-        pageNum < 1 ||
-        !Number.isInteger(limitNum) ||
-        limitNum < 1
-    ) {
-        const error = new Error("Invalid pagination parameters.");
-        error.statusCode = 400;
-        throw error;
-    }
-
-    const safeLimit = Math.min(limitNum, 100);
-
     const total = filteredList.length;
-    const totalPages = Math.ceil(total / safeLimit);
-    const startIndex = (pageNum - 1) * safeLimit;
+    const totalPages = Math.ceil(total / limitNum);
+    const startIndex = (pageNum - 1) * limitNum;
 
     const paginatedList = filteredList.slice(
         startIndex,
-        startIndex + safeLimit
+        startIndex + limitNum
     );
 
     return {
@@ -337,20 +348,20 @@ const getEligibleStudentsForDrive = async (driveId, options = {}) => {
             status: drive.status,
             packageLPA: drive.packageLPA,
         },
-        criteria: {
-            minimumCGPA: criteria?.minimumCGPA ?? 0,
-            minimumTenth: criteria?.minimumTenth ?? 0,
-            minimumTwelfth: criteria?.minimumTwelfth ?? null,
-            minimumDiplomaPercentage: criteria?.minimumDiplomaPercentage ?? null,
-            maximumBacklogs: criteria?.maximumBacklogs ?? 0,
-            allowPreviousPlacement: criteria?.allowPreviousPlacement ?? false,
+        criteria: criteria ? {
+            minimumCGPA: criteria.minimumCGPA ?? 0,
+            minimumTenth: criteria.minimumTenth ?? 0,
+            minimumTwelfth: criteria.minimumTwelfth ?? null,
+            minimumDiplomaPercentage: criteria.minimumDiplomaPercentage ?? null,
+            maximumBacklogs: criteria.maximumBacklogs ?? 0,
+            allowPreviousPlacement: criteria.allowPreviousPlacement ?? false,
             eligibleDepartments: drive.eligibleBranches.map((b) => ({
                 id: b.department.id,
                 name: b.department.name,
                 code: b.department.code,
             })),
             eligibleGraduationYears: eligibleYears,
-        },
+        } : null,
         summary: {
             totalEvaluated: evaluated.length,
             eligibleCount,
