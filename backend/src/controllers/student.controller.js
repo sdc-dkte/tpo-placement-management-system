@@ -304,7 +304,31 @@ const getStudents = async (req, res) => {
             });
         }
 
+
         const where = {};
+
+        // Filter students by their associated user account status.
+        // By default, show only active students.
+        const rawIsActive = req.query.isActive;
+
+        if (
+            rawIsActive !== undefined &&
+            rawIsActive !== "true" &&
+            rawIsActive !== "false"
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "isActive must be either true or false.",
+            });
+        }
+
+        const isActive = rawIsActive === "false" ? false : true;
+
+        where.user = {
+            is: {
+                isActive,
+            },
+        };
 
         // Validate placement status filter
         const validStatuses = [
