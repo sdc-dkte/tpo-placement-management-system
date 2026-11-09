@@ -31,6 +31,8 @@ const documentRoutes = require("./routes/document.routes");
 const emailCampaignRoutes = require("./routes/emailCampaign.routes");
 const departmentRoutes = require("./routes/department.routes");
 
+const analyticsRoutes = require("./routes/analytics.routes");
+
 const app = express();
 
 // ====================
@@ -86,6 +88,8 @@ app.use("/api/v1/documents", documentRoutes);
 
 app.use("/api/v1/email-campaigns", emailCampaignRoutes);
 app.use("/api/v1/departments", departmentRoutes);
+
+app.use("/api/v1/analytics", analyticsRoutes);
 
 // ====================
 // 4. Not Found Handler
