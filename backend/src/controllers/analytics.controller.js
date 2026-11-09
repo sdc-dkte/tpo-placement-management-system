@@ -153,7 +153,7 @@ const getMonthly = async (req, res) => {
 
             year = Number(yearValue);
 
-            if (year < 1900 || year > 2100) {
+            if (year < 1900 || year > 2099) {
                 badRequest(
                     "year must be between 1900 and 2100."
                 );
@@ -264,7 +264,7 @@ const getDepartments = async (req, res) => {
             if (
                 endYear !== (startYear + 1) % 100 ||
                 startYear < 1900 ||
-                startYear > 2100
+                startYear > 2099
             ) {
                 return res.status(400).json({
                     success: false,
@@ -277,11 +277,11 @@ const getDepartments = async (req, res) => {
             // Default to the current academic year
             const today = new Date();
 
-            const currentYear = today.getFullYear();
+            const currentYear = today.getUTCFullYear();
 
-            const startYear = today.getMonth() >= 6
-                ? currentYear
-                : currentYear - 1;
+            const startYear = today.getUTCMonth() >= 6
+            ? currentYear
+            : currentYear - 1;
 
             academicYear =
                 `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
@@ -302,6 +302,13 @@ const getDepartments = async (req, res) => {
 
             departmentId = Number(departmentId);
 
+            if (!Number.isSafeInteger(departmentId)) {
+                return res.status(400).json({
+                success: false,
+                message: "departmentId must be a positive safe integer."
+            });
+}
+
         }
 
         const data = await getDepartmentsAnalytics({
@@ -316,17 +323,21 @@ const getDepartments = async (req, res) => {
 
     } catch (error) {
 
-        console.error("Departments Analytics Error:", error);
-
-        return res.status(error.statusCode || 500).json({
+    if (error instanceof ValidationError) {
+        return res.status(400).json({
             success: false,
-            message: error.statusCode
-                ? error.message
-                : "Failed to fetch department analytics"
+            message: error.message
         });
-
     }
 
+    console.error("Departments Analytics Error:", error);
+
+    return res.status(500).json({
+        success: false,
+        message: "Failed to fetch department analytics"
+    });
+
+}
 };
 
 
@@ -353,20 +364,30 @@ const getCompanies = async (req, res) => {
     const { academicYear, companyId, departmentId } = req.query;
 
     // Validate academic year.
-    if (
-      academicYear !== undefined &&
-      (
-        typeof academicYear !== "string" ||
-        !/^\d{4}-\d{2}$/.test(academicYear) ||
-        Number(academicYear.split("-")[1]) !==
-          (Number(academicYear.split("-")[0]) + 1) % 100
-      )
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid academicYear. Use format YYYY-YY, e.g. 2026-27.",
-      });
-    }
+    if (academicYear !== undefined) {
+  if (
+    typeof academicYear !== "string" ||
+    !/^\d{4}-\d{2}$/.test(academicYear)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid academicYear. Use format YYYY-YY, e.g. 2026-27.",
+    });
+  }
+
+  const [startYear, endYear] = academicYear.split("-").map(Number);
+
+  if (
+    startYear < 1900 ||
+    startYear > 2099 ||
+    endYear !== (startYear + 1) % 100
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid academicYear. The ending year must be the next year and the starting year must be between 1900 and 2099.",
+    });
+  }
+}
 
     // Default to the current academic year (July-June).
     const now = new Date();
@@ -413,13 +434,20 @@ const getCompanies = async (req, res) => {
       data,
     });
   } catch (error) {
-    console.error("Companies analytics error:", error);
-
-    return res.status(500).json({
+  if (error instanceof ValidationError) {
+    return res.status(400).json({
       success: false,
-      message: "Failed to fetch company analytics.",
+      message: error.message,
     });
   }
+
+  console.error("Companies analytics error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: "Failed to fetch company analytics.",
+  });
+}
 };
 
 const getYearly = async (req, res) => {
@@ -459,7 +487,12 @@ const getYearly = async (req, res) => {
     const fromMatch = academicYearRegex.exec(fromYear);
     const toMatch = academicYearRegex.exec(toYear);
 
-    if (!fromMatch || !toMatch) {
+    if (
+      typeof fromYear !== "string" ||
+      typeof toYear !== "string" ||
+      !fromMatch ||
+      !toMatch
+    ) {
       return res.status(400).json({
         success: false,
         message: "fromYear and toYear must follow YYYY-YY format, e.g. 2023-24."
@@ -535,13 +568,20 @@ const getYearly = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Yearly analytics error:", error);
-
-    return res.status(500).json({
+  if (error instanceof ValidationError) {
+    return res.status(400).json({
       success: false,
-      message: "Failed to fetch yearly analytics."
+      message: error.message,
     });
   }
+
+  console.error("Yearly analytics error:", error);
+
+  return res.status(500).json({
+    success: false,
+    message: "Failed to fetch yearly analytics."
+  });
+}
 };
 
 module.exports = {

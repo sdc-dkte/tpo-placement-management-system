@@ -13,7 +13,6 @@ const {
   getYearly
 } = require("../controllers/analytics.controller");
 
-// All Analytics APIs require authentication and TPO access.
 router.use(authenticateToken);
 router.use(allowRoles("TPO"));
 

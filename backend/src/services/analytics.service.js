@@ -1,57 +1,128 @@
-
 const prisma = require("../prismaClient");
 const ValidationError = require("../utils/ValidationError");
 
+// Only these statuses count as successful placements.
 const PLACED_STATUSES = ["SELECTED", "OFFER_ACCEPTED"];
 
+// Maximum number of academic years allowed in one yearly request.
+const MAX_YEARLY_RANGE = 10;
+
+// --------------------------------------------------
+// 1. COMMON VALIDATION HELPERS
+// --------------------------------------------------
+
+const badRequest = (message) => {
+  const error = new ValidationError(message);
+  error.statusCode = 400;
+  return error;
+};
+
 /**
- * Converts YYYY-YY into its starting year, ending year,
- * and July-to-June date range.
+ * Validates and converts an academic year.
  *
- * Example: 2026-27
- * graduationYear = 2027
- * date range = 1 July 2026 to 1 July 2027 (exclusive)
+ * Example:
+ * 2026-27
+ * Graduation year: 2027
+ * Start date: 1 July 2026
+ * End date: 1 July 2027 (exclusive)
  */
-const parseAcademicYear = (academicYear) => {
-  if (academicYear === undefined) {
+const parseAcademicYear = (academicYear, required = false) => {
+  if (academicYear === undefined || academicYear === "") {
+    if (required) {
+      throw badRequest("academicYear is required.");
+    }
+
     return null;
   }
 
   if (typeof academicYear !== "string") {
-    throw new ValidationError(
+    throw badRequest(
       "academicYear must be a string in YYYY-YY format."
     );
   }
 
-  const match = academicYear.match(/^(\d{4})-(\d{2})$/);
+  const match = /^(\d{4})-(\d{2})$/.exec(academicYear);
 
   if (!match) {
-    throw new ValidationError(
+    throw badRequest(
       "Invalid academicYear. Use YYYY-YY format, e.g. 2026-27."
     );
   }
 
   const startYear = Number(match[1]);
-  const endYear = startYear + 1;
-  const expectedEnd = String(endYear).slice(-2);
+  const endingYear = Number(match[2]);
 
-  if (match[2] !== expectedEnd) {
-    throw new ValidationError(
+  if (startYear < 1900 || startYear > 2099) {
+    throw badRequest(
+      "Academic year must start between 1900 and 2099."
+    );
+  }
+
+  if (endingYear !== (startYear + 1) % 100) {
+    throw badRequest(
       "Invalid academic year range. The ending year must be one year after the starting year."
     );
   }
 
   return {
     academicYear,
-    graduationYear: endYear,
+    startYear,
+    graduationYear: startYear + 1,
     startDate: new Date(Date.UTC(startYear, 6, 1)),
-    endDate: new Date(Date.UTC(endYear, 6, 1)),
+    endDate: new Date(Date.UTC(startYear + 1, 6, 1)),
   };
 };
 
 /**
+ * Validates a positive safe integer ID.
+ */
+const validateId = (id, fieldName) => {
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0
+  ) {
+    throw badRequest(`${fieldName} must be a positive safe integer.`);
+  }
+};
+
+/**
+ * Checks whether a department exists.
+ */
+const validateDepartmentExists = async (departmentId) => {
+  if (departmentId === undefined) return;
+
+  validateId(departmentId, "departmentId");
+
+  const department = await prisma.department.findUnique({
+    where: { id: departmentId },
+    select: { id: true },
+  });
+
+  if (!department) {
+    throw badRequest("Department not found.");
+  }
+};
+
+/**
+ * Checks whether a company exists.
+ */
+const validateCompanyExists = async (companyId) => {
+  if (companyId === undefined) return;
+
+  validateId(companyId, "companyId");
+
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: { id: true },
+  });
+
+  if (!company) {
+    throw badRequest("Company not found.");
+  }
+};
+
+/**
  * Rounds a number to two decimal places.
- * Returns zero when the value is null or undefined.
  */
 const roundToTwo = (value) => {
   if (value === null || value === undefined) {
@@ -61,31 +132,30 @@ const roundToTwo = (value) => {
   return Number(value.toFixed(2));
 };
 
+// --------------------------------------------------
+// 2. OVERVIEW ANALYTICS
+// --------------------------------------------------
 
-//Returns overall placement statistics.
 const getOverviewAnalytics = async (academicYear) => {
   const year = parseAcademicYear(academicYear);
 
-  // Filter students by graduation year when an academic year is provided.
   const studentWhere = year
     ? { graduationYear: year.graduationYear }
     : {};
 
-  // Only successful placement statuses count as placed.
   const selectionWhere = {
     status: {
       in: PLACED_STATUSES,
     },
-    ...(year
-      ? {
-          student: {
-            graduationYear: year.graduationYear,
-          },
-        }
-      : {}),
-  };
+    ...(year && {
+    student: {
+      is: {
+        graduationYear: year.graduationYear,
+      },
+    },
+  }),
+};
 
-  // Filter drives using their actual driveDate.
   const driveWhere = year
     ? {
         driveDate: {
@@ -102,22 +172,18 @@ const getOverviewAnalytics = async (academicYear) => {
     totalCompanies,
     packageStats,
   ] = await Promise.all([
-    // 1. Total students
     prisma.student.count({
       where: studentWhere,
     }),
 
-    // 2. Unique placed students
     prisma.studentSelection.count({
       where: selectionWhere,
     }),
 
-    // 3. Total placement drives
     prisma.placementDrive.count({
       where: driveWhere,
     }),
 
-    // 4. Companies that conducted placement drives
     prisma.company.count({
       where: {
         placementDrives: {
@@ -126,7 +192,7 @@ const getOverviewAnalytics = async (academicYear) => {
       },
     }),
 
-    // 5. Package statistics for successful offers
+    // Declined offers are excluded from package statistics.
     prisma.studentSelection.aggregate({
       where: selectionWhere,
       _avg: {
@@ -147,9 +213,9 @@ const getOverviewAnalytics = async (academicYear) => {
   );
 
   const placementPercentage =
-    totalStudents === 0
-      ? 0
-      : (placedStudents / totalStudents) * 100;
+    totalStudents > 0
+      ? (placedStudents / totalStudents) * 100
+      : 0;
 
   return {
     academicYear: year ? year.academicYear : "ALL",
@@ -165,425 +231,380 @@ const getOverviewAnalytics = async (academicYear) => {
   };
 };
 
+// --------------------------------------------------
+// 3. MONTHLY ANALYTICS
+// --------------------------------------------------
 
 const getMonthlyAnalytics = async ({
-    academicYear,
-    year,
-    departmentId,
-    companyId
+  academicYear,
+  year,
+  departmentId,
+  companyId,
 }) => {
-    // 1. Determine the 12-month reporting period.
-    // Academic year: July to June.
-    // Calendar year: January to December.
-    let startYear;
-    let startMonth;
+  if (academicYear !== undefined && year !== undefined) {
+    throw badRequest(
+      "Provide either academicYear or year, not both."
+    );
+  }
 
-    if (year) {
-        startYear = year;
-        startMonth = 0;
-    } else if (academicYear) {
-        startYear = Number(academicYear.slice(0, 4));
-        startMonth = 6;
-    } else {
-        // Default to the current academic year.
-        const currentDate = new Date();
-        const currentYear = currentDate.getUTCFullYear();
+  await Promise.all([
+    validateDepartmentExists(departmentId),
+    validateCompanyExists(companyId),
+  ]);
 
-        if (currentDate.getUTCMonth() >= 6) {
-            startYear = currentYear;
-        } else {
-            startYear = currentYear - 1;
-        }
+  let startYear;
+  let startMonth;
 
-        startMonth = 6;
+  if (year !== undefined) {
+    if (
+      !Number.isSafeInteger(year) ||
+      year < 1900 ||
+      year > 2099
+    ) {
+      throw badRequest("year must be a valid calendar year between 1900 and 2099.");
     }
 
-    const startDate = new Date(
-        Date.UTC(startYear, startMonth, 1)
+    startYear = year;
+    startMonth = 0;
+  } else if (academicYear !== undefined) {
+    const parsedYear = parseAcademicYear(academicYear);
+
+    startYear = parsedYear.startYear;
+    startMonth = 6;
+  } else {
+    const currentDate = new Date();
+    const currentYear = currentDate.getUTCFullYear();
+
+    startYear =
+      currentDate.getUTCMonth() >= 6
+        ? currentYear
+        : currentYear - 1;
+
+    startMonth = 6;
+  }
+
+  const startDate = new Date(
+    Date.UTC(startYear, startMonth, 1)
+  );
+
+  const endDate = new Date(
+    Date.UTC(startYear, startMonth + 12, 1)
+  );
+
+  // Drives within the selected period.
+  const driveWhere = {
+    driveDate: {
+      gte: startDate,
+      lt: endDate,
+    },
+    ...(companyId !== undefined && { companyId }),
+    ...(departmentId !== undefined && {
+      eligibleBranches: {
+        some: { departmentId },
+      },
+    }),
+  };
+
+  // Only successful placements are included.
+  const selectionWhere = {
+    selectedAt: {
+      gte: startDate,
+      lt: endDate,
+    },
+    status: {
+      in: PLACED_STATUSES,
+    },
+    ...(departmentId !== undefined && {
+      student: {
+        is: { departmentId },
+      },
+    }),
+    ...(companyId !== undefined && {
+      drive: {
+        is: { companyId },
+      },
+    }),
+  };
+
+  const [drives, selections] = await Promise.all([
+    prisma.placementDrive.findMany({
+      where: driveWhere,
+      select: {
+        driveDate: true,
+      },
+    }),
+
+    prisma.studentSelection.findMany({
+      where: selectionWhere,
+      select: {
+        selectedAt: true,
+        status: true,
+        packageLPA: true,
+      },
+    }),
+  ]);
+
+  // Create 12 monthly buckets.
+  const monthlyData = [];
+  const monthlyMap = new Map();
+
+  for (let i = 0; i < 12; i++) {
+    const monthDate = new Date(
+      Date.UTC(startYear, startMonth + i, 1)
     );
 
-    const endDate = new Date(
-        Date.UTC(startYear, startMonth + 12, 1)
-    );
-
-    // 2. Verify department and company IDs exist.
-    if (departmentId !== undefined) {
-        const department = await prisma.department.findUnique({
-            where: { id: departmentId },
-            select: { id: true }
-        });
-
-        if (!department) {
-            const error = new Error("Department not found.");
-            error.statusCode = 400;
-            throw error;
-        }
-    }
-
-    if (companyId !== undefined) {
-        const company = await prisma.company.findUnique({
-            where: { id: companyId },
-            select: { id: true }
-        });
-
-        if (!company) {
-            const error = new Error("Company not found.");
-            error.statusCode = 400;
-            throw error;
-        }
-    }
-
-    // 3. Build PlacementDrive filters.
-    const driveWhere = {
-        driveDate: {
-            gte: startDate,
-            lt: endDate
-        },
-
-        ...(companyId !== undefined && {
-            companyId
-        }),
-
-        // A drive must be eligible for the selected department.
-        ...(departmentId !== undefined && {
-            eligibleBranches: {
-                some: {
-                    departmentId
-                }
-            }
-        })
-    };
-
-    // 4. Build StudentSelection filters.
-    const selectionWhere = {
-        selectedAt: {
-            gte: startDate,
-            lt: endDate
-        },
-
-        // Declined offers are not successful placements.
-        status: {
-            in: ["SELECTED", "OFFER_ACCEPTED"]
-        },
-
-        ...(departmentId !== undefined && {
-            student: {
-                is: {
-                    departmentId
-                }
-            }
-        }),
-
-        ...(companyId !== undefined && {
-            drive: {
-                is: {
-                    companyId
-                }
-            }
-        })
-    };
-
-    // 5. Fetch actual drive and selection records.
-    const [drives, selections] = await Promise.all([
-        prisma.placementDrive.findMany({
-            where: driveWhere,
-            select: {
-                driveDate: true
-            }
-        }),
-
-        prisma.studentSelection.findMany({
-            where: selectionWhere,
-            select: {
-                selectedAt: true,
-                status: true,
-                packageLPA: true
-            }
-        })
-    ]);
-
-    // 6. Prepare 12 monthly buckets.
-    const monthlyData = [];
-
-    const monthlyMap = new Map();
-
-    for (let i = 0; i < 12; i++) {
-        const monthDate = new Date(
-            Date.UTC(startYear, startMonth + i, 1)
-        );
-
-        const month = monthDate.toLocaleString("en-US", {
-            month: "long",
-            timeZone: "UTC"
-        });
-
-        const monthKey =
-            `${monthDate.getUTCFullYear()}-` +
-            `${String(monthDate.getUTCMonth() + 1).padStart(2, "0")}`;
-
-        const record = {
-            month,
-            totalDrives: 0,
-            studentsSelected: 0,
-            offersAccepted: 0,
-            averagePackageLPA: 0,
-            packageTotal: 0,
-            packageCount: 0
-        };
-
-        monthlyData.push(record);
-        monthlyMap.set(monthKey, record);
-    }
-
-    // Helper to identify the month of a date.
-    const getMonthKey = (date) => {
-        const parsedDate = new Date(date);
-
-        const month = String(
-            parsedDate.getUTCMonth() + 1
-        ).padStart(2, "0");
-
-        return `${parsedDate.getUTCFullYear()}-${month}`;
-    };
-
-    // 7. Count drives using driveDate.
-    for (const drive of drives) {
-        if (!drive.driveDate) continue;
-
-        const key = getMonthKey(drive.driveDate);
-        const monthRecord = monthlyMap.get(key);
-
-        if (monthRecord) {
-            monthRecord.totalDrives++;
-        }
-    }
-
-    // 8. Calculate selection and offer statistics.
-    for (const selection of selections) {
-        const key = getMonthKey(selection.selectedAt);
-        const monthRecord = monthlyMap.get(key);
-
-        if (!monthRecord) continue;
-
-        monthRecord.studentsSelected++;
-
-        if (selection.status === "OFFER_ACCEPTED") {
-            monthRecord.offersAccepted++;
-        }
-
-        // Only positive, finite packages are included
-        // in the average package calculation.
-        if (
-            Number.isFinite(selection.packageLPA) &&
-            selection.packageLPA > 0
-        ) {
-            monthRecord.packageTotal += selection.packageLPA;
-            monthRecord.packageCount++;
-        }
-    }
-
-    // 9. Calculate averages and remove internal fields.
-    return monthlyData.map((record) => {
-        const averagePackageLPA =
-            record.packageCount > 0
-                ? Number(
-                    (
-                        record.packageTotal /
-                        record.packageCount
-                    ).toFixed(2)
-                )
-                : 0;
-
-        return {
-            month: record.month,
-            totalDrives: record.totalDrives,
-            studentsSelected: record.studentsSelected,
-            offersAccepted: record.offersAccepted,
-            averagePackageLPA
-        };
+    const month = monthDate.toLocaleString("en-US", {
+      month: "long",
+      timeZone: "UTC",
     });
+
+    const monthKey =
+      `${monthDate.getUTCFullYear()}-` +
+      `${String(monthDate.getUTCMonth() + 1).padStart(2, "0")}`;
+
+    const record = {
+      month,
+      totalDrives: 0,
+      studentsSelected: 0,
+      offersAccepted: 0,
+      averagePackageLPA: 0,
+      packageTotal: 0,
+      packageCount: 0,
+    };
+
+    monthlyData.push(record);
+    monthlyMap.set(monthKey, record);
+  }
+
+  const getMonthKey = (date) => {
+    const parsedDate = new Date(date);
+
+    const month = String(
+      parsedDate.getUTCMonth() + 1
+    ).padStart(2, "0");
+
+    return `${parsedDate.getUTCFullYear()}-${month}`;
+  };
+
+  // Count drives by driveDate.
+  for (const drive of drives) {
+    if (!drive.driveDate) continue;
+
+    const key = getMonthKey(drive.driveDate);
+    const monthRecord = monthlyMap.get(key);
+
+    if (monthRecord) {
+      monthRecord.totalDrives++;
+    }
+  }
+
+  // Calculate successful selection and offer statistics.
+  for (const selection of selections) {
+  const key = getMonthKey(selection.selectedAt);
+  const monthRecord = monthlyMap.get(key);
+
+  if (!monthRecord) continue;
+
+  monthRecord.studentsSelected++;
+
+  if (selection.status === "OFFER_ACCEPTED") {
+    monthRecord.offersAccepted++;
+  }
+
+  // Only successful placements contribute to package statistics.
+  if (PLACED_STATUSES.includes(selection.status)) {
+    const packageValue = Number(selection.packageLPA);
+
+    if (
+      Number.isFinite(packageValue) &&
+      packageValue > 0
+    ) {
+      monthRecord.packageTotal += packageValue;
+      monthRecord.packageCount++;
+    }
+  }
+}
+
+  return monthlyData.map((record) => {
+    const averagePackageLPA =
+      record.packageCount > 0
+        ? roundToTwo(
+            record.packageTotal / record.packageCount
+          )
+        : 0;
+
+    return {
+      month: record.month,
+      totalDrives: record.totalDrives,
+      studentsSelected: record.studentsSelected,
+      offersAccepted: record.offersAccepted,
+      averagePackageLPA,
+    };
+  });
 };
 
+// --------------------------------------------------
+// 4. DEPARTMENT ANALYTICS
+// --------------------------------------------------
+
 const getDepartmentsAnalytics = async ({
-    academicYear,
-    departmentId
+  academicYear,
+  departmentId,
 }) => {
+  const year = parseAcademicYear(academicYear, true);
 
-    // Academic year: 2026-27
-    // Graduation year: 2027
-    const graduationYear = Number(academicYear.split("-")[0]) + 1;
+  await validateDepartmentExists(departmentId);
 
-    // Check whether the requested department exists
-    if (departmentId) {
-        const departmentExists = await prisma.department.findUnique({
-            where: {
-                id: departmentId
-            },
-            select: {
-                id: true
-            }
-        });
+  const departments = await prisma.department.findMany({
+    where:
+      departmentId !== undefined
+        ? { id: departmentId }
+        : {},
 
-        if (!departmentExists) {
-            const error = new Error("Department not found");
-            error.statusCode = 400;
-            throw error;
-        }
-    }
+    orderBy: {
+      name: "asc",
+    },
 
-    // Fetch departments and their students for the selected year
-    const departments = await prisma.department.findMany({
+    select: {
+      id: true,
+      name: true,
 
-        where: departmentId
-            ? { id: departmentId }
-            : {},
-
-        orderBy: {
-            name: "asc"
+      students: {
+        where: {
+          graduationYear: year.graduationYear,
         },
 
         select: {
-            id: true,
-            name: true,
+          id: true,
 
-            students: {
-                where: {
-                    graduationYear: graduationYear
-                },
+          selection: {
+            select: {
+              status: true,
+              packageLPA: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-                select: {
-                    id: true,
+  return departments.map((department) => {
+    const totalStudents = department.students.length;
 
-                    selection: {
-                        select: {
-                            status: true,
-                            packageLPA: true
-                        }
-                    }
-                }
-            }
-        }
-    });
+    const placedStudents = department.students.filter(
+      (student) =>
+        student.selection &&
+        PLACED_STATUSES.includes(student.selection.status)
+    );
 
-    // Calculate analytics department-wise
-    const result = departments.map((department) => {
+    const placedCount = placedStudents.length;
 
-        const totalStudents = department.students.length;
+    const notPlacedStudents = Math.max(
+      totalStudents - placedCount,
+      0
+    );
 
-        // Only SELECTED and OFFER_ACCEPTED count as placed
-        const placedStudents = department.students.filter((student) => {
+    const placementPercentage =
+      totalStudents > 0
+        ? roundToTwo((placedCount / totalStudents) * 100)
+        : 0;
 
-            return (
-                student.selection &&
-                (
-                    student.selection.status === "SELECTED" ||
-                    student.selection.status === "OFFER_ACCEPTED"
-                )
-            );
+    // Only successful placements contribute to package statistics.
+    const packages = placedStudents
+      .map((student) => Number(student.selection.packageLPA))
+      .filter(
+        (value) => Number.isFinite(value) && value > 0
+      );
 
-        });
+    const averagePackageLPA =
+      packages.length > 0
+        ? roundToTwo(
+            packages.reduce((sum, value) => sum + value, 0) /
+              packages.length
+          )
+        : 0;
 
-        const placedCount = placedStudents.length;
+    const highestPackageLPA =
+      packages.length > 0
+        ? roundToTwo(Math.max(...packages))
+        : 0;
 
-        const notPlacedStudents = totalStudents - placedCount;
-
-        // Calculate placement percentage
-        const placementPercentage = totalStudents > 0
-            ? Number(((placedCount / totalStudents) * 100).toFixed(2))
-            : 0;
-
-        // Get valid package values from successfully placed students
-        const packages = placedStudents
-            .map((student) => Number(student.selection.packageLPA))
-            .filter((value) => Number.isFinite(value) && value > 0);
-
-        // Calculate average package
-        const averagePackageLPA = packages.length > 0
-            ? Number((
-                packages.reduce((sum, value) => sum + value, 0) /
-                packages.length
-            ).toFixed(2))
-            : 0;
-
-        // Calculate highest package
-        const highestPackageLPA = packages.length > 0
-            ? Number(Math.max(...packages).toFixed(2))
-            : 0;
-
-        return {
-            departmentId: department.id,
-            departmentName: department.name,
-            totalStudents,
-            placedStudents: placedCount,
-            notPlacedStudents,
-            placementPercentage,
-            averagePackageLPA,
-            highestPackageLPA
-        };
-    });
-
-    return result;
+    return {
+      departmentId: department.id,
+      departmentName: department.name,
+      totalStudents,
+      placedStudents: placedCount,
+      notPlacedStudents,
+      placementPercentage,
+      averagePackageLPA,
+      highestPackageLPA,
+    };
+  });
 };
 
-
-const SUCCESSFUL_STATUSES = ["SELECTED", "OFFER_ACCEPTED"];
+// --------------------------------------------------
+// 5. COMPANY ANALYTICS
+// --------------------------------------------------
 
 const getCompaniesAnalytics = async ({
   academicYear,
   companyId,
   departmentId,
 }) => {
-  const startYear = Number(academicYear.split("-")[0]);
+  const year = parseAcademicYear(academicYear, true);
 
-  // Academic year runs from July to June.
-  const startDate = new Date(Date.UTC(startYear, 6, 1));
-  const endDate = new Date(Date.UTC(startYear + 1, 6, 1));
+  await Promise.all([
+    validateCompanyExists(companyId),
+    validateDepartmentExists(departmentId),
+  ]);
 
-  // A company drive is counted when its driveDate falls
-  // within the selected academic year.
   const driveWhere = {
     driveDate: {
-      gte: startDate,
-      lt: endDate,
+      gte: year.startDate,
+      lt: year.endDate,
     },
-    ...(departmentId
-      ? {
-          eligibleBranches: {
-            some: { departmentId },
-          },
-        }
-      : {}),
+    ...(departmentId !== undefined && {
+      eligibleBranches: {
+        some: { departmentId },
+      },
+    }),
   };
 
-  // Selection statistics use the selection event date.
   const selectionWhere = {
     selectedAt: {
-      gte: startDate,
-      lt: endDate,
+      gte: year.startDate,
+      lt: year.endDate,
     },
-    ...(departmentId
-      ? {
-          student: {
-            departmentId,
-          },
-        }
-      : {}),
+    ...(departmentId !== undefined && {
+      student: {
+        is: { departmentId },
+      },
+    }),
   };
 
   const companies = await prisma.company.findMany({
-    where: companyId ? { id: companyId } : {},
+    where:
+      companyId !== undefined
+        ? { id: companyId }
+        : {},
+
     orderBy: {
       name: "asc",
     },
+
     select: {
       id: true,
       name: true,
+
       placementDrives: {
         where: driveWhere,
+
         select: {
           id: true,
+
           selections: {
             where: selectionWhere,
+
             select: {
               studentId: true,
               status: true,
@@ -600,11 +621,11 @@ const getCompaniesAnalytics = async ({
       (drive) => drive.selections
     );
 
-    // Count unique students, not multiple drives/selections.
+    // Count unique students with successful placement statuses.
     const selectedStudentIds = new Set(
       allSelections
         .filter((selection) =>
-          SUCCESSFUL_STATUSES.includes(selection.status)
+          PLACED_STATUSES.includes(selection.status)
         )
         .map((selection) => selection.studentId)
     );
@@ -617,23 +638,29 @@ const getCompaniesAnalytics = async ({
       (selection) => selection.status === "OFFER_DECLINED"
     ).length;
 
-    // Package offered is included even if the student declined it.
+    // IMPORTANT:
+    // Declined offers must not contribute to package statistics.
     const validPackages = allSelections
+      .filter((selection) =>
+        PLACED_STATUSES.includes(selection.status)
+      )
       .map((selection) => Number(selection.packageLPA))
-      .filter((value) => Number.isFinite(value) && value > 0);
+      .filter(
+        (value) => Number.isFinite(value) && value > 0
+      );
 
     const averagePackageLPA =
       validPackages.length > 0
-        ? Number(
-            (
-              validPackages.reduce((sum, value) => sum + value, 0) /
+        ? roundToTwo(
+            validPackages.reduce((sum, value) => sum + value, 0) /
               validPackages.length
-            ).toFixed(2)
           )
         : 0;
 
     const highestPackageLPA =
-      validPackages.length > 0 ? Math.max(...validPackages) : 0;
+      validPackages.length > 0
+        ? roundToTwo(Math.max(...validPackages))
+        : 0;
 
     return {
       companyId: company.id,
@@ -648,104 +675,128 @@ const getCompaniesAnalytics = async ({
   });
 };
 
+// --------------------------------------------------
+// 6. YEARLY ANALYTICS
+// --------------------------------------------------
+
 const getYearlyAnalytics = async ({
   fromYear,
   toYear,
-  departmentId
+  departmentId,
 }) => {
+  const from = parseAcademicYear(fromYear, true);
+  const to = parseAcademicYear(toYear, true);
+
+  await validateDepartmentExists(departmentId);
+
+  if (from.startYear > to.startYear) {
+    throw badRequest(
+      "fromYear cannot be greater than toYear."
+    );
+  }
+
+  const numberOfYears = to.startYear - from.startYear + 1;
+
+  if (numberOfYears > MAX_YEARLY_RANGE) {
+    throw badRequest(
+      `The maximum allowed yearly analytics range is ${MAX_YEARLY_RANGE} academic years.`
+    );
+  }
+
   const result = [];
 
-  const startYear = Number(fromYear.split("-")[0]);
-  const endYear = Number(toYear.split("-")[0]);
-
-  // Loop through every academic year in the requested range.
-  for (let year = startYear; year <= endYear; year++) {
-
+  for (
+    let startYear = from.startYear;
+    startYear <= to.startYear;
+    startYear++
+  ) {
     const academicYear =
-      `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
+      `${startYear}-${String((startYear + 1) % 100).padStart(2, "0")}`;
 
-    // Example: academic year 2023-24 corresponds to graduationYear 2024.
-    const graduationYear = year + 1;
+    // Example: 2023-24 corresponds to graduationYear 2024.
+    const graduationYear = startYear + 1;
 
     const studentWhere = {
       graduationYear,
-      ...(departmentId !== undefined ? { departmentId } : {})
+      ...(departmentId !== undefined && { departmentId }),
     };
 
-    // 1. Count total students in this academic year.
     const totalStudents = await prisma.student.count({
-      where: studentWhere
+      where: studentWhere,
     });
 
-    // 2. Find students who are selected or have accepted an offer.
     const selections = await prisma.studentSelection.findMany({
       where: {
         status: {
-          in: ["SELECTED", "OFFER_ACCEPTED"]
-        },
-        student: {
-          is: studentWhere
-        }
+        in: PLACED_STATUSES,
       },
+
+      selectedAt: {
+        gte: new Date(Date.UTC(startYear, 6, 1)),
+        lt: new Date(Date.UTC(startYear + 1, 6, 1)),
+      },
+
+      student: {
+        is: studentWhere,
+      },
+    },
+
       select: {
         studentId: true,
-        packageLPA: true
-      }
+        packageLPA: true,
+      },
     });
 
-    // 3. Count unique placed students.
     const placedStudents = new Set(
       selections.map((selection) => selection.studentId)
     ).size;
 
-    // 4. Calculate placement percentage.
     const placementPercentage =
       totalStudents > 0
-        ? Number(
-            ((placedStudents / totalStudents) * 100).toFixed(2)
-          )
+        ? roundToTwo((placedStudents / totalStudents) * 100)
         : 0;
 
-    // 5. Get valid package values.
+    // Only successful placements contribute to package statistics.
     const packages = selections
       .map((selection) => Number(selection.packageLPA))
-      .filter((pkg) => Number.isFinite(pkg) && pkg > 0);
+      .filter(
+        (value) => Number.isFinite(value) && value > 0
+      );
 
-    // 6. Calculate average package.
     const averagePackageLPA =
       packages.length > 0
-        ? Number(
-            (
-              packages.reduce((sum, pkg) => sum + pkg, 0) /
+        ? roundToTwo(
+            packages.reduce((sum, value) => sum + value, 0) /
               packages.length
-            ).toFixed(2)
           )
         : 0;
 
-    // 7. Calculate highest package.
     const highestPackageLPA =
       packages.length > 0
-        ? Math.max(...packages)
+        ? roundToTwo(Math.max(...packages))
         : 0;
 
-    // 8. Store this academic year's analytics.
     result.push({
       academicYear,
       totalStudents,
       placedStudents,
       placementPercentage,
       averagePackageLPA,
-      highestPackageLPA
+      highestPackageLPA,
     });
   }
 
   return result;
 };
 
+// --------------------------------------------------
+// EXPORT ALL ANALYTICS SERVICES
+// --------------------------------------------------
+
 module.exports = {
   getOverviewAnalytics,
   getMonthlyAnalytics,
   getDepartmentsAnalytics,
   getCompaniesAnalytics,
-  getYearlyAnalytics
+  getYearlyAnalytics,
 };
