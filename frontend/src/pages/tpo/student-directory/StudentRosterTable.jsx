@@ -1,10 +1,64 @@
 import React from "react";
-import { Check, AlertTriangle, ArrowRight, User, Pencil, Trash2, FileText } from "lucide-react";
+import {
+  Check,
+  AlertTriangle,
+  ArrowRight,
+  User,
+  Pencil,
+  Trash2,
+  FileText,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from "lucide-react";
+
+function SortableTh({
+  field,
+  label,
+  currentSortBy,
+  currentSortOrder,
+  onSort,
+  className = "",
+  align = "left",
+}) {
+  const isActive = currentSortBy === field;
+  return (
+    <th className={`py-2.5 px-3 select-none ${className}`}>
+      {onSort ? (
+        <button
+          type="button"
+          onClick={() => onSort(field)}
+          className={`inline-flex items-center gap-1 group font-semibold uppercase tracking-wider text-[11px] hover:text-gray-900 transition-colors cursor-pointer ${
+            isActive ? "text-gray-900" : "text-gray-500"
+          } ${align === "center" ? "justify-center w-full" : ""}`}
+        >
+          <span>{label}</span>
+          {isActive ? (
+            currentSortOrder === "asc" ? (
+              <ArrowUp className="w-3 h-3 text-blue-600 flex-shrink-0" />
+            ) : (
+              <ArrowDown className="w-3 h-3 text-blue-600 flex-shrink-0" />
+            )
+          ) : (
+            <ArrowUpDown className="w-3 h-3 text-gray-300 opacity-60 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+          )}
+        </button>
+      ) : (
+        <span className="font-semibold uppercase tracking-wider text-[11px] text-gray-500">
+          {label}
+        </span>
+      )}
+    </th>
+  );
+}
 
 export default function StudentRosterTable({
   students = [],
   selectedIds = [],
   activeStudentId = null,
+  sortBy = "name",
+  sortOrder = "asc",
+  onSort,
   onToggleSelect,
   onToggleSelectAll,
   onViewDossier,
@@ -40,10 +94,10 @@ export default function StudentRosterTable({
 
   return (
     <div className="bg-white border border-[#E5E7EB] rounded overflow-hidden shadow-xs">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto max-h-[70vh]">
         <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-50/80 border-b border-[#E5E7EB] text-[11px] font-semibold text-gray-500 uppercase tracking-wider h-10 select-none">
+          <thead className="sticky top-0 bg-slate-50/95 backdrop-blur z-10 border-b border-[#E5E7EB]">
+            <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider h-10 select-none">
               <th className="pl-4 py-2 w-10">
                 <input
                   type="checkbox"
@@ -56,14 +110,58 @@ export default function StudentRosterTable({
                   className="rounded border-gray-300 text-gray-900 focus:ring-0 cursor-pointer"
                 />
               </th>
-              <th className="py-2 px-3 w-28">PRN</th>
-              <th className="py-2 px-3">Candidate Name & Email</th>
-              <th className="py-2 px-3">Branch</th>
-              <th className="py-2 px-3 text-center w-20">CGPA</th>
-              <th className="py-2 px-3 text-center w-24">Backlogs</th>
-              <th className="py-2 px-3 w-32">Placement Status</th>
-              <th className="py-2 px-4">Organization & Package</th>
-              <th className="py-2 px-4 text-right w-40">Actions</th>
+              <SortableTh
+                field="PRN"
+                label="PRN"
+                currentSortBy={sortBy}
+                currentSortOrder={sortOrder}
+                onSort={onSort}
+                className="w-28"
+              />
+              <SortableTh
+                field="name"
+                label="Candidate Name & Email"
+                currentSortBy={sortBy}
+                currentSortOrder={sortOrder}
+                onSort={onSort}
+              />
+              <th className="py-2.5 px-3">
+                <span className="font-semibold uppercase tracking-wider text-[11px] text-gray-500">
+                  Branch
+                </span>
+              </th>
+              <SortableTh
+                field="CGPA"
+                label="CGPA"
+                currentSortBy={sortBy}
+                currentSortOrder={sortOrder}
+                onSort={onSort}
+                className="text-center w-24"
+                align="center"
+              />
+              <th className="py-2.5 px-3 text-center w-28">
+                <span className="font-semibold uppercase tracking-wider text-[11px] text-gray-500">
+                  Backlogs
+                </span>
+              </th>
+              <SortableTh
+                field="placementStatus"
+                label="Placement Status"
+                currentSortBy={sortBy}
+                currentSortOrder={sortOrder}
+                onSort={onSort}
+                className="w-36"
+              />
+              <th className="py-2.5 px-4 min-w-[200px]">
+                <span className="font-semibold uppercase tracking-wider text-[11px] text-gray-500">
+                  Placement Details
+                </span>
+              </th>
+              <th className="py-2.5 px-4 text-right w-40">
+                <span className="font-semibold uppercase tracking-wider text-[11px] text-gray-500">
+                  Actions
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-xs">
@@ -83,6 +181,22 @@ export default function StudentRosterTable({
               students.map((student) => {
                 const isSelected = selectedIds.includes(student.id);
                 const isActive = activeStudentId === student.id;
+
+                const isPlacedConfirmed =
+                  student.status === "Placed / Confirmed" ||
+                  student.status === "Placed" ||
+                  student.rawPlacementStatus === "OFFER_ACCEPTED";
+
+                const isSelectedPending =
+                  student.status === "Selected" ||
+                  student.rawPlacementStatus === "SELECTED";
+
+                const isOfferDeclined =
+                  student.status === "Offer Declined" ||
+                  student.rawPlacementStatus === "OFFER_DECLINED";
+
+                const isOfferAccepted =
+                  student.status === "Offer Accepted";
 
                 return (
                   <tr
@@ -130,7 +244,7 @@ export default function StudentRosterTable({
                           <div className="font-semibold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
                             {student.name}
                           </div>
-                          <div className="text-gray-400 text-[11px] font-mono truncate">
+                          <div className="text-slate-600 text-[11px] font-mono truncate">
                             {student.email}
                           </div>
                         </div>
@@ -152,59 +266,86 @@ export default function StudentRosterTable({
                       {student.backlogs === 0 ? (
                         <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-xs tabular-nums bg-emerald-50/70 border border-emerald-200/60 px-2 py-0.5 rounded-full">
                           <Check className="w-3 h-3 text-emerald-600" />
-                          <span>0</span>
+                          <span>0 Active</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 font-semibold text-[11px] tabular-nums">
                           <AlertTriangle className="w-3 h-3 text-rose-500" />
-                          <span>{student.backlogs} Live</span>
+                          <span>{student.backlogs} Active</span>
                         </span>
                       )}
                     </td>
 
                     {/* Placement Status */}
-                    <td className="px-3 py-2.5">
-                      {student.status === "Placed" && (
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {isPlacedConfirmed ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span>Placed / Confirmed</span>
+                        </span>
+                      ) : isOfferAccepted ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <span>Placed</span>
+                          <span>Offer Accepted</span>
                         </span>
-                      )}
-                      {student.status === "In Review" && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-semibold">
+                      ) : isSelectedPending ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                          <span>Selected</span>
+                        </span>
+                      ) : isOfferDeclined ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-medium">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          <span>In Review</span>
+                          <span>Offer Declined</span>
                         </span>
-                      )}
-                      {student.status === "Unplaced" && (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-medium">
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-medium">
                           <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
                           <span>Unplaced</span>
                         </span>
                       )}
                     </td>
 
-                    {/* Organization & Package */}
-                    <td className="px-4 py-2.5">
-                      {student.status === "Placed" ? (
-                        <div className="flex items-center gap-1.5">
+                    {/* Placement Details */}
+                    <td className="px-4 py-2.5 text-xs">
+                      {student.placementDetails ? (
+                        <span
+                          className={`font-medium ${
+                            isPlacedConfirmed
+                              ? "text-emerald-900"
+                              : isSelectedPending
+                              ? "text-blue-900"
+                              : isOfferDeclined
+                              ? "text-amber-900"
+                              : "text-gray-500"
+                          }`}
+                        >
+                          {student.placementDetails}
+                        </span>
+                      ) : isPlacedConfirmed ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-semibold text-gray-900">
-                            {student.organization}
+                            {student.organization || "Corporate Partner"}
                           </span>
                           {student.packageLPA && (
-                            <span className="text-gray-700 font-medium tabular-nums text-[11px] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            <span className="text-gray-800 font-mono font-medium tabular-nums text-[11px] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                               ₹{Number(student.packageLPA).toFixed(2)} LPA
                             </span>
                           )}
                         </div>
-                      ) : student.status === "In Review" ? (
-                        <span className="text-amber-800 font-medium text-xs">
-                          {student.organization}
-                          {student.packageLPA && ` (Est. ₹${student.packageLPA} LPA)`}
+                      ) : isSelectedPending ? (
+                        <span className="text-blue-800 font-medium">
+                          {student.organization ? `${student.organization} • ` : ""}
+                          Selection Pending Confirmation
+                        </span>
+                      ) : isOfferDeclined ? (
+                        <span className="text-amber-800 font-medium">
+                          {student.organization ? `${student.organization} • ` : ""}
+                          Offer Declined
                         </span>
                       ) : (
-                        <span className="text-gray-400 text-[11px]">
-                          Open to Drives
+                        <span className="text-gray-500 font-normal">
+                          Not Placed
                         </span>
                       )}
                     </td>
@@ -227,7 +368,7 @@ export default function StudentRosterTable({
                         <button
                           type="button"
                           onClick={() => onEditStudent && onEditStudent(student)}
-                          title="Edit Student Details"
+                          title="Edit Candidate Details"
                           className="p-1.5 text-gray-400 hover:text-gray-700 rounded-md hover:bg-gray-100 transition cursor-pointer"
                         >
                           <Pencil className="w-3.5 h-3.5" />
@@ -235,7 +376,7 @@ export default function StudentRosterTable({
                         <button
                           type="button"
                           onClick={() => onViewDossier && onViewDossier(student)}
-                          title={`View ${student.name}'s Documents & Resume`}
+                          title="View Verified Candidate Documents"
                           className="p-1.5 text-gray-400 hover:text-blue-700 rounded-md hover:bg-blue-50 transition cursor-pointer"
                         >
                           <FileText className="w-3.5 h-3.5" />
@@ -243,7 +384,7 @@ export default function StudentRosterTable({
                         <button
                           type="button"
                           onClick={() => onDeleteStudent && onDeleteStudent(student)}
-                          title="Remove Candidate"
+                          title="Deactivate Candidate Account"
                           className="p-1.5 text-gray-400 hover:text-rose-600 rounded-md hover:bg-rose-50 transition cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

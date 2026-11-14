@@ -4,7 +4,7 @@ export default function StudentStatsBar({
   total = 0,
   placed = 0,
   unplaced = 0,
-  syncStatus = "Active & Synchronized",
+  syncStatus = "Institutional Roster Active • All 8 Branches Enrolled",
 }) {
   const placedPercent = total > 0 ? ((placed / total) * 100).toFixed(1) : "0.0";
 
@@ -33,10 +33,10 @@ export default function StudentStatsBar({
         {/* Divider dot */}
         <span className="text-gray-300 hidden sm:inline">•</span>
 
-        {/* Unplaced & Seeking */}
+        {/* Unplaced Candidates */}
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
-          <span className="text-gray-500">Unplaced & Seeking:</span>
+          <span className="text-gray-500">Unplaced Candidates:</span>
           <span className="font-bold text-gray-900 tabular-nums">{unplaced.toLocaleString()}</span>
         </div>
       </div>

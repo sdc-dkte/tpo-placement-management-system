@@ -53,7 +53,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async ({ email, password, role }) => {
-    setIsLoading(true);
     setAuthError(null);
     try {
       const response = await loginApi({ email, password, role });
@@ -67,8 +66,6 @@ export function AuthProvider({ children }) {
     } catch (err) {
       setAuthError(err.message || 'Failed to authenticate.');
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   }, []);
 

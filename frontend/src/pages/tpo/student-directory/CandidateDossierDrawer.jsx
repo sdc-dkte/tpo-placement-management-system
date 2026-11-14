@@ -13,8 +13,6 @@ import {
   FileText,
   Download,
   ExternalLink,
-  Printer,
-  CheckCircle,
 } from "lucide-react";
 import {
   getStudentByIdApi,
@@ -32,7 +30,6 @@ export default function CandidateDossierDrawer({
 }) {
   const [dossierData, setDossierData] = useState(student);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
-  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [downloadingDocId, setDownloadingDocId] = useState(null);
@@ -55,10 +52,30 @@ export default function CandidateDossierDrawer({
           if (!isCurrent) return;
           if (res?.data) {
             const apiStudent = res.data;
-            const isPlaced =
-              apiStudent.placementStatus === "SELECTED" ||
-              apiStudent.placementStatus === "OFFER_ACCEPTED" ||
-              apiStudent.selection?.status === "SELECTED";
+            const rawStatus =
+              apiStudent.placementStatus ||
+              apiStudent.selection?.status ||
+              "NOT_SELECTED";
+
+            const companyName =
+              apiStudent.companyName ||
+              apiStudent.selection?.drive?.company?.name ||
+              apiStudent.selection?.company?.name ||
+              null;
+
+            const packageLPA =
+              apiStudent.packageLPA ??
+              apiStudent.selection?.packageLPA ??
+              null;
+
+            let status = "Unplaced";
+            if (rawStatus === "OFFER_ACCEPTED") {
+              status = "Placed / Confirmed";
+            } else if (rawStatus === "SELECTED") {
+              status = "Selected";
+            } else if (rawStatus === "OFFER_DECLINED") {
+              status = "Offer Declined";
+            }
 
             setDossierData((prev) => ({
               ...prev,
@@ -75,9 +92,10 @@ export default function CandidateDossierDrawer({
               twelfthPercentage: apiStudent.twelfthPercentage ?? prev.twelfthPercentage,
               diplomaPercentage: apiStudent.diplomaPercentage ?? prev.diplomaPercentage,
               graduationYear: apiStudent.graduationYear || prev.graduationYear,
-              status: isPlaced ? "Placed" : prev.status || "Unplaced",
-              organization: apiStudent.selection?.company?.name || prev.organization,
-              packageLPA: apiStudent.selection?.packageLPA ?? prev.packageLPA,
+              status: status !== "Unplaced" ? status : prev.status || "Unplaced",
+              rawPlacementStatus: rawStatus,
+              organization: companyName || prev.organization,
+              packageLPA: packageLPA ?? prev.packageLPA,
             }));
           }
         })
@@ -165,60 +183,6 @@ export default function CandidateDossierDrawer({
     } finally {
       setDownloadingDocId(null);
     }
-  };
-
-  const handleDownloadResume = async () => {
-    try {
-      const token = localStorage.getItem("tpo_auth_token");
-      const res = await fetch(`/api/v1/students/${studentDisplay.id}/resume?download=true`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${studentDisplay.prn}_Resume.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        return;
-      }
-    } catch {
-      // Fallback to generated dossier
-    }
-
-    const content =
-      `DKTE TEI PLACEMENT MANAGEMENT SYSTEM - CANDIDATE PLACEMENT DOSSIER\n` +
-      `===================================================================\n` +
-      `PRN:                ${studentDisplay.prn}\n` +
-      `Candidate Name:     ${studentDisplay.name}\n` +
-      `Official Email:     ${studentDisplay.email}\n` +
-      `Department:         ${studentDisplay.branch} (${studentDisplay.deptCode || "ENGG"})\n` +
-      `Graduation Batch:   ${studentDisplay.graduationYear || 2026}\n` +
-      `Academic Pathway:   ${studentDisplay.academicPathway}\n` +
-      `Current CGPA:       ${studentDisplay.cgpa !== null ? Number(studentDisplay.cgpa).toFixed(2) : "N/A"}\n` +
-      `Active Backlogs:    ${studentDisplay.backlogs}\n` +
-      `10th Percentage:    ${studentDisplay.tenthPercentage ? studentDisplay.tenthPercentage + "%" : "N/A"}\n` +
-      `12th Percentage:    ${studentDisplay.twelfthPercentage ? studentDisplay.twelfthPercentage + "%" : "N/A"}\n` +
-      `Diploma Percentage: ${studentDisplay.diplomaPercentage ? studentDisplay.diplomaPercentage + "%" : "N/A"}\n` +
-      `Placement Status:   ${studentDisplay.status}\n` +
-      `Recruiting Org:     ${studentDisplay.organization || "Unplaced"}\n` +
-      `Package CTC:        ${studentDisplay.packageLPA ? "₹" + Number(studentDisplay.packageLPA).toFixed(2) + " LPA" : "N/A"}\n` +
-      `Verification Date:  ${new Date().toLocaleDateString("en-IN")}\n` +
-      `===================================================================\n` +
-      `This dossier is officially verified by the DKTE Training & Placement Office.\n`;
-
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${studentDisplay.prn}_Placement_Dossier.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -353,41 +317,87 @@ export default function CandidateDossierDrawer({
 
             {/* Current Placement Outcome */}
             <div className="border border-[#E5E7EB] rounded p-4 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
-                <Award className="w-4 h-4 text-gray-600" />
-                <span>Placement Outcome</span>
+              <div className="flex items-center justify-between text-xs font-bold text-gray-900 uppercase tracking-wider pb-1 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <Award className="w-4 h-4 text-gray-600" />
+                  <span>Placement Outcome</span>
+                </div>
+                <span
+                  className={`font-semibold text-[11px] px-2.5 py-0.5 rounded-full ${
+                    studentDisplay.status === "Placed / Confirmed" ||
+                    studentDisplay.status === "Placed" ||
+                    studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED"
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                      : studentDisplay.status === "Selected" ||
+                        studentDisplay.rawPlacementStatus === "SELECTED"
+                      ? "bg-blue-50 text-blue-800 border border-blue-200"
+                      : studentDisplay.status === "Offer Declined" ||
+                        studentDisplay.rawPlacementStatus === "OFFER_DECLINED"
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : "bg-slate-100 text-slate-700 border border-slate-200"
+                  }`}
+                >
+                  {studentDisplay.status}
+                </span>
               </div>
 
-              {studentDisplay.status === "Placed" ? (
+              {studentDisplay.status === "Placed / Confirmed" ||
+              studentDisplay.status === "Placed" ||
+              studentDisplay.rawPlacementStatus === "OFFER_ACCEPTED" ? (
                 <div className="p-3 bg-emerald-50/60 border border-emerald-200 rounded space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-950">
                       Offer Confirmed
                     </span>
-                    <span className="text-xs font-bold text-emerald-800 tabular-nums bg-emerald-100/80 px-2 py-0.5 rounded">
-                      ₹{Number(studentDisplay.packageLPA || 0).toFixed(2)} LPA
-                    </span>
+                    {studentDisplay.packageLPA && (
+                      <span className="text-xs font-bold font-mono text-emerald-800 tabular-nums bg-emerald-100/80 px-2 py-0.5 rounded">
+                        ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                      </span>
+                    )}
                   </div>
                   <div className="text-sm font-semibold text-gray-900">
-                    {studentDisplay.organization || "Selected Candidate"}
+                    {studentDisplay.organization || "Corporate Partner"}
                   </div>
-                  <div className="text-[11px] text-emerald-800">
-                    Official offer letter verified by TPO Office.
+                  <div className="text-[11px] text-emerald-900 leading-relaxed font-medium">
+                    Institutional Clause 4.2 Placement Lockdown Active: Candidate has officially accepted this appointment.
                   </div>
                 </div>
-              ) : studentDisplay.status === "In Review" ? (
+              ) : studentDisplay.status === "Selected" ||
+                studentDisplay.rawPlacementStatus === "SELECTED" ? (
+                <div className="p-3 bg-blue-50/60 border border-blue-200 rounded space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-950">
+                      Selection Pending Confirmation
+                    </span>
+                    {studentDisplay.packageLPA && (
+                      <span className="text-xs font-bold font-mono text-blue-800 tabular-nums bg-blue-100/80 px-2 py-0.5 rounded">
+                        ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {studentDisplay.organization || "Corporate Partner"}
+                  </div>
+                  <div className="text-[11px] text-blue-900 leading-relaxed">
+                    Selected by recruiter; placement pending student offer acceptance. Clause 4.2 profile lock is NOT active until confirmed.
+                  </div>
+                </div>
+              ) : studentDisplay.status === "Offer Declined" ||
+                studentDisplay.rawPlacementStatus === "OFFER_DECLINED" ? (
                 <div className="p-3 bg-amber-50/60 border border-amber-200 rounded space-y-1.5">
-                  <div className="text-xs font-bold text-amber-950">Recruitment In Progress</div>
-                  <div className="text-sm font-semibold text-gray-900">{studentDisplay.organization}</div>
-                  <div className="text-[11px] text-amber-800">
-                    Active interview / evaluation stage in current campus drive.
+                  <div className="text-xs font-bold text-amber-950">Offer Declined</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    {studentDisplay.organization || "Corporate Partner"}
+                  </div>
+                  <div className="text-[11px] text-amber-900 leading-relaxed">
+                    Candidate declined offer. Profile remains active and unreserved for upcoming campus drives.
                   </div>
                 </div>
               ) : (
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded text-center">
-                  <div className="text-xs font-semibold text-gray-700">Open to Recruitment Drives</div>
-                  <div className="text-[11px] text-gray-500 mt-1">
-                    Eligible for upcoming recruitment notifications matching criteria.
+                  <div className="text-xs font-semibold text-gray-800">Not Placed</div>
+                  <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                    Currently not placed with an official corporate partner. Eligible for upcoming recruitment drives matching academic cutoffs.
                   </div>
                 </div>
               )}
@@ -488,44 +498,6 @@ export default function CandidateDossierDrawer({
                     No student-uploaded files found in registry.
                   </div>
                 )}
-
-                {/* Always-available Official Institutional Placement Dossier */}
-                <div className="p-3 rounded bg-amber-50/40 border border-amber-200/80 flex items-center justify-between gap-3 text-xs mt-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded bg-amber-100 text-amber-800 flex items-center justify-center flex-shrink-0 font-bold text-xs">
-                      DKTE
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-semibold text-gray-900 truncate">
-                        {studentDisplay.prn}_Placement_Dossier
-                      </div>
-                      <div className="text-[11px] text-amber-900">
-                        Official Verified Placement Summary
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setIsPreviewModalOpen(true)}
-                      title="View Verified Placement Dossier"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 text-xs font-semibold transition cursor-pointer"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Preview</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadResume}
-                      title="Download Placement Dossier"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-dkte-gold hover:bg-dkte-gold-hover text-[#111827] text-xs font-bold transition shadow-2xs cursor-pointer active:scale-[0.98]"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Export</span>
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -572,204 +544,6 @@ export default function CandidateDossierDrawer({
           </div>
         </aside>
       </div>
-
-      {/* Verified Candidate Placement Document Preview Modal */}
-      {isPreviewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
-            onClick={() => setIsPreviewModalOpen(false)}
-          />
-
-          <div className="relative w-full max-w-xl bg-white border border-[#E5E7EB] rounded-lg shadow-2xl overflow-hidden z-10 animate-fadeIn flex flex-col max-h-[90vh]">
-            {/* Header */}
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between flex-shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded bg-[#FECC00] text-[#111827] flex items-center justify-center font-bold text-xs flex-shrink-0">
-                  DKTE
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100">
-                    Official Candidate Placement Dossier
-                  </h3>
-                  <div className="text-[11px] text-slate-400 font-mono">
-                    {studentDisplay.prn} • {studentDisplay.name}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsPreviewModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Document Content */}
-            <div className="p-6 overflow-y-auto space-y-4 text-xs font-sans bg-[#F8FAFC]">
-              {/* Institutional Header Banner */}
-              <div className="p-4 bg-white border border-slate-200 rounded text-center space-y-1">
-                <div className="font-bold text-sm text-gray-900 tracking-tight">
-                  D.K.T.E. SOCIETY'S TEXTILE & ENGINEERING INSTITUTE, ICHALKARANJI
-                </div>
-                <div className="text-[11px] text-gray-500 font-medium">
-                  Training & Placement Office • Central Placement Registry
-                </div>
-                <div className="pt-1 flex items-center justify-center gap-1.5 text-[11px] text-emerald-700 font-semibold">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Officially Verified Placement Record</span>
-                </div>
-              </div>
-
-              {/* Personal & Academic Data Grid */}
-              <div className="bg-white border border-slate-200 rounded p-4 space-y-3">
-                <div className="font-bold text-gray-900 text-[11px] uppercase tracking-wider pb-1 border-b border-gray-100">
-                  Candidate Credentials
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Candidate Full Name</span>
-                    <span className="font-semibold text-gray-900">{studentDisplay.name}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Permanent PRN</span>
-                    <span className="font-mono font-bold text-gray-900">{studentDisplay.prn}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Academic Department</span>
-                    <span className="font-medium text-gray-900">{studentDisplay.branch}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Graduation Batch</span>
-                    <span className="font-mono font-medium text-gray-900">{studentDisplay.graduationYear || 2026}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Official Email</span>
-                    <span className="font-mono text-gray-800 break-all">{studentDisplay.email}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 block text-[10px]">Academic Pathway</span>
-                    <span className="font-semibold text-gray-800">{studentDisplay.academicPathway}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Academic Performance Matrix */}
-              <div className="bg-white border border-slate-200 rounded p-4 space-y-3">
-                <div className="font-bold text-gray-900 text-[11px] uppercase tracking-wider pb-1 border-b border-gray-100">
-                  Academic Performance Records
-                </div>
-
-                <div className="grid grid-cols-3 gap-2.5 text-center">
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
-                    <span className="text-[10px] text-gray-500 block">10th Percentage</span>
-                    <span className="font-bold text-gray-900 text-sm tabular-nums">
-                      {studentDisplay.tenthPercentage ? `${studentDisplay.tenthPercentage}%` : "—"}
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
-                    <span className="text-[10px] text-gray-500 block">
-                      {studentDisplay.academicPathway === "DIPLOMA" ? "Diploma %" : "12th Percentage"}
-                    </span>
-                    <span className="font-bold text-gray-900 text-sm tabular-nums">
-                      {studentDisplay.academicPathway === "DIPLOMA"
-                        ? studentDisplay.diplomaPercentage
-                          ? `${studentDisplay.diplomaPercentage}%`
-                          : "—"
-                        : studentDisplay.twelfthPercentage
-                        ? `${studentDisplay.twelfthPercentage}%`
-                        : "—"}
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded">
-                    <span className="text-[10px] text-gray-500 block">Current CGPA</span>
-                    <span className="font-bold text-blue-700 text-sm tabular-nums">
-                      {studentDisplay.cgpa !== null ? Number(studentDisplay.cgpa).toFixed(2) : "—"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-1 px-1">
-                  <span className="text-gray-500">Live Active Backlogs:</span>
-                  <span className={`font-semibold tabular-nums ${studentDisplay.backlogs > 0 ? "text-rose-600" : "text-emerald-700"}`}>
-                    {studentDisplay.backlogs === 0 ? "0 Active Backlogs (All Cleared)" : `${studentDisplay.backlogs} Active Backlog(s)`}
-                  </span>
-                </div>
-              </div>
-
-              {/* Placement Status Card */}
-              <div className="bg-white border border-slate-200 rounded p-4 space-y-2">
-                <div className="font-bold text-gray-900 text-[11px] uppercase tracking-wider pb-1 border-b border-gray-100 flex items-center justify-between">
-                  <span>Recruitment & Offer Details</span>
-                  <span className={`font-semibold text-[11px] px-2 py-0.5 rounded-full ${
-                    studentDisplay.status === "Placed"
-                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                      : "bg-slate-100 text-slate-700 border border-slate-200"
-                  }`}>
-                    {studentDisplay.status}
-                  </span>
-                </div>
-
-                {studentDisplay.status === "Placed" ? (
-                  <div className="flex items-center justify-between pt-1">
-                    <div>
-                      <span className="text-[10px] text-gray-500 block">Recruiting Company</span>
-                      <span className="font-bold text-gray-900 text-sm">{studentDisplay.organization}</span>
-                    </div>
-                    {studentDisplay.packageLPA && (
-                      <div className="text-right">
-                        <span className="text-[10px] text-gray-500 block">Confirmed Compensation</span>
-                        <span className="font-mono font-bold text-emerald-700 text-sm tabular-nums">
-                          ₹{Number(studentDisplay.packageLPA).toFixed(2)} LPA
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-500 italic py-1">
-                    Candidate is actively participating in ongoing placement drives.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 bg-white border-t border-[#E5E7EB] flex items-center justify-between gap-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded transition inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5 text-gray-500" />
-                <span>Print Dossier</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadResume}
-                  className="bg-dkte-gold hover:bg-dkte-gold-hover text-[#111827] text-xs font-bold px-3.5 py-1.5 rounded transition shadow-2xs inline-flex items-center gap-1.5 cursor-pointer active:scale-[0.98]"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Dossier (.txt)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPreviewModalOpen(false)}
-                  className="bg-gray-900 hover:bg-black text-white text-xs font-semibold px-4 py-1.5 rounded transition cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

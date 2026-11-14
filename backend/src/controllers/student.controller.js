@@ -272,7 +272,9 @@ const getStudents = async (req, res) => {
             graduationYear,
             minCGPA,
             maxBacklogs,
+            minBacklogs,
             status,
+            sortBy = "name",
             sortOrder = "asc",
         } = req.query;
 
@@ -302,6 +304,7 @@ const getStudents = async (req, res) => {
             });
         }
 
+
         const where = {};
         if (req.query.includeInactive !== "true") {
             where.user = {
@@ -311,14 +314,55 @@ const getStudents = async (req, res) => {
             };
         }
 
-        // Validate placement status filter
+        // Filter students by their associated user account status.
+        // By default, show only active students.
+        const rawIsActive = req.query.isActive;
+
         if (
-            status !== undefined &&
-            !["PLACED", "UNPLACED"].includes(status)
+            rawIsActive !== undefined &&
+            rawIsActive !== "true" &&
+            rawIsActive !== "false"
         ) {
             return res.status(400).json({
                 success: false,
-                message: "Status must be PLACED or UNPLACED.",
+                message: "isActive must be either true or false.",
+            });
+        }
+
+        const isActive = rawIsActive === "false" ? false : true;
+
+        where.user = {
+            is: {
+                isActive,
+            },
+        };
+
+        // Validate placement status filter
+        const validStatuses = [
+            "PLACED",
+            "UNPLACED",
+            "SELECTED",
+            "OFFER_ACCEPTED",
+            "OFFER_DECLINED",
+        ];
+        if (
+            status !== undefined &&
+            !validStatuses.includes(status)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Status must be PLACED, UNPLACED, SELECTED, OFFER_ACCEPTED, or OFFER_DECLINED.",
+            });
+        }
+
+        if (
+            sortBy !== undefined &&
+            !["name", "PRN", "CGPA", "placementStatus"].includes(sortBy)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "sortBy must be name, PRN, CGPA, or placementStatus",
             });
         }
 
@@ -331,9 +375,25 @@ const getStudents = async (req, res) => {
                     },
                 },
             };
-        }
-
-        if (status === "UNPLACED") {
+        } else if (status === "SELECTED") {
+            where.selection = {
+                is: {
+                    status: "SELECTED",
+                },
+            };
+        } else if (status === "OFFER_ACCEPTED") {
+            where.selection = {
+                is: {
+                    status: "OFFER_ACCEPTED",
+                },
+            };
+        } else if (status === "OFFER_DECLINED") {
+            where.selection = {
+                is: {
+                    status: "OFFER_DECLINED",
+                },
+            };
+        } else if (status === "UNPLACED") {
             where.AND = [
                 {
                     OR: [
@@ -433,6 +493,7 @@ const getStudents = async (req, res) => {
         let parsedGraduationYear;
         let parsedMinCGPA;
         let parsedMaxBacklogs;
+        let parsedMinBacklogs;
 
         try {
             parsedDepartmentId = parseIntegerFilter(
@@ -457,6 +518,12 @@ const getStudents = async (req, res) => {
             parsedMaxBacklogs = parseIntegerFilter(
                 maxBacklogs,
                 "maxBacklogs",
+                0
+            );
+
+            parsedMinBacklogs = parseIntegerFilter(
+                minBacklogs,
+                "minBacklogs",
                 0
             );
         } catch (error) {
@@ -484,8 +551,29 @@ const getStudents = async (req, res) => {
 
         if (parsedMaxBacklogs !== null) {
             // Inclusive: students with exactly this many backlogs are included.
-            where.activeBacklogs = { lte: parsedMaxBacklogs };
+            where.activeBacklogs = {
+                ...(where.activeBacklogs || {}),
+                lte: parsedMaxBacklogs,
+            };
         }
+
+        if (parsedMinBacklogs !== null) {
+            where.activeBacklogs = {
+                ...(where.activeBacklogs || {}),
+                gte: parsedMinBacklogs,
+            };
+        }
+
+        const allowedSortFields = {
+            name: { user: { name: sortOrder } },
+            PRN: { PRN: sortOrder },
+            CGPA: { CGPA: sortOrder },
+            placementStatus: { selection: { status: sortOrder } },
+        };
+
+        const orderBy = allowedSortFields[sortBy]
+            ? [allowedSortFields[sortBy], { id: "asc" }]
+            : [{ user: { name: sortOrder } }, { id: "asc" }];
 
         const [total, students] = await Promise.all([
             prisma.student.count({ where }),
@@ -494,10 +582,7 @@ const getStudents = async (req, res) => {
                 where,
                 skip: (page - 1) * limit,
                 take: limit,
-                orderBy: [
-                    { user: { name: sortOrder } },
-                    { id: "asc" },
-                ],
+                orderBy,
                 select: {
                     id: true,
                     PRN: true,
@@ -989,6 +1074,15 @@ const getStudentById = async (req, res) => {
                         status: true,
                         packageLPA: true,
                         selectedAt: true,
+                        drive: {
+                            select: {
+                                company: {
+                                    select: {
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
             },
@@ -1012,6 +1106,8 @@ const getStudentById = async (req, res) => {
                 placementStatus: student.selection
                     ? student.selection.status
                     : "NOT_SELECTED",
+                companyName: student.selection?.drive?.company?.name || null,
+                packageLPA: student.selection?.packageLPA || null,
             },
         });
     } catch (error) {
@@ -1072,6 +1168,15 @@ const getMyProfile = async (req, res) => {
                         status: true,
                         packageLPA: true,
                         selectedAt: true,
+                        drive: {
+                            select: {
+                                company: {
+                                    select: {
+                                        name: true,
+                                    },
+                                },
+                            },
+                        },
                     },
                 },
             },
@@ -1095,6 +1200,8 @@ const getMyProfile = async (req, res) => {
                 placementStatus: student.selection
                     ? student.selection.status
                     : "NOT_SELECTED",
+                companyName: student.selection?.drive?.company?.name || null,
+                packageLPA: student.selection?.packageLPA || null,
             },
         });
     } catch (error) {
