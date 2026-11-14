@@ -163,7 +163,7 @@ async function createSelection(req, res) {
 }
 
 
-const PRN_REGEX = /^\d{2}[A-Z]{3}\d{3}$/;
+const PRN_REGEX = /^\d{2}[A-Z]{2,4}\d{3,4}$/;
 const MAX_BULK_SIZE = 100;
 
 async function bulkCreateSelections(req, res) {
@@ -233,7 +233,7 @@ async function bulkCreateSelections(req, res) {
           prn: rawPRN,
           status: "FAILED",
           code: "INVALID_PRN_FORMAT",
-          message: "PRN must contain 2 digits, 3 uppercase letters and 3 digits.",
+          message: "PRN must contain 2 digits, 2 to 4 uppercase letters, and 3 to 4 digits.",
         });
         continue;
       }

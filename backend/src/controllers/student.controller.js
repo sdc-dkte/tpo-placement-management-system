@@ -306,6 +306,13 @@ const getStudents = async (req, res) => {
 
 
         const where = {};
+        if (req.query.includeInactive !== "true") {
+            where.user = {
+                is: {
+                    isActive: true,
+                },
+            };
+        }
 
         // Filter students by their associated user account status.
         // By default, show only active students.
@@ -590,6 +597,7 @@ const getStudents = async (req, res) => {
                         select: {
                             name: true,
                             email: true,
+                            isActive: true,
                         },
                     },
                     department: {
